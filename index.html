@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BioMap Lab v3.1 — Workspace de Entomologia, Epidemiologia & Pesquisa</title>
+  <title>BioMap Lab v3.2 — Workspace de Entomologia, Epidemiologia & Pesquisa</title>
 
   <!-- Tailwind CSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -162,7 +162,7 @@
             <div>
               <h1 class="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
                 BioMap <span class="text-emerald-400">Lab</span>
-                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-cyan-300 border border-slate-700">v3.1</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-cyan-300 border border-slate-700">v3.2</span>
               </h1>
               <p class="text-[11px] text-slate-400 leading-tight">Entomo • Epidemio • SIG</p>
             </div>
@@ -409,18 +409,132 @@
        SCRIPT PRINCIPAL DA APLICAÇÃO
        ======================================================================= -->
   <script>
-    const STORAGE_KEY = 'biomap_lab_workspace_v3_1';
+    const STORAGE_KEY = 'biomap_lab_workspace_v3_2';
+    const LEGACY_STORAGE_KEYS = [
+      'biomap_lab_workspace_v3_1',
+      'biomap_lab_v3',
+      'biomap_lab_state_v3',
+      'biomap_lab_data'
+    ];
     const IDB_NAME = 'BioMapLabVaultDB_v3';
     const IDB_VERSION = 1;
     const IDB_STORE = 'files';
 
-    const BANCADA_STAGES = [
-      'Triagem',
-      'Clarificação / Dissecção',
-      'Montagem',
-      'Identificação Taxonômica',
-      'Prancha / Foto'
+    // Protocolos Flexíveis da Bancada Entomológica
+    const BANCADA_PROTOCOLS = {
+      slide: {
+        id: 'slide',
+        label: 'Lâmina & Clarificação',
+        fullLabel: 'Lâmina & Clarificação (Flebotomíneos / Microdiptera)',
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        steps: [
+          'Triagem',
+          'Clarificação / Dissecção',
+          'Montagem em Lâmina',
+          'Identificação Taxonômica',
+          'Prancha / Foto'
+        ]
+      },
+      stereo: {
+        id: 'stereo',
+        label: 'Direta em Lupa',
+        fullLabel: 'Identificação Direta em Lupa (Culicídeos: Anopheles, Aedes, Culex)',
+        badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+        steps: [
+          'Triagem',
+          'Morfologia Externa (Lupa)',
+          'Identificação Taxonômica',
+          'Preservação (Alfinete / Tubo)',
+          'Registro / Planilha'
+        ]
+      },
+      quick: {
+        id: 'quick',
+        label: 'Triagem Rápida',
+        fullLabel: 'Triagem & Curadoria Rápida (Sem montagem)',
+        badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        steps: [
+          'Recebimento / Triagem',
+          'Separação por Táxon',
+          'Etiquetagem & Armazenamento'
+        ]
+      },
+      custom: {
+        id: 'custom',
+        label: 'Personalizado',
+        fullLabel: 'Fluxo Personalizado (Etapas Livres)',
+        badgeClass: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+        steps: [
+          'Triagem',
+          'Processamento',
+          'Conclusão'
+        ]
+      }
+    };
+
+    const PRESERVATION_MEDIA = [
+      'Berlese',
+      'Bálsamo do Canadá',
+      'Euparal',
+      'Alfinetado',
+      'Tubo Seco / Sílica',
+      'Álcool 70%'
     ];
+
+    const BANCADA_PRESETS = {
+      phlebotominae: {
+        protocol: 'slide',
+        medium: 'Berlese',
+        taxonPlaceholder: 'Ex.: Nyssomyia umbratilis (Phlebotominae)'
+      },
+      anopheles: {
+        protocol: 'stereo',
+        medium: 'Alfinetado',
+        taxonPlaceholder: 'Ex.: Anopheles (Nyssorhynchus) darlingi'
+      },
+      aedes_culex: {
+        protocol: 'stereo',
+        medium: 'Álcool 70%',
+        taxonPlaceholder: 'Ex.: Aedes aegypti / Culex quinquefasciatus'
+      },
+      triagem_geral: {
+        protocol: 'quick',
+        medium: 'Álcool 70%',
+        taxonPlaceholder: 'Ex.: Diptera Hematófagos (Triagem Geral)'
+      }
+    };
+
+    function getBatchProtocolObj(batch) {
+      const key = batch && batch.protocol && BANCADA_PROTOCOLS[batch.protocol] ? batch.protocol : 'slide';
+      return BANCADA_PROTOCOLS[key];
+    }
+
+    function getBatchSteps(batch) {
+      const proto = getBatchProtocolObj(batch);
+      if (proto.id === 'custom' && Array.isArray(batch.customStages) && batch.customStages.length > 0) {
+        return batch.customStages;
+      }
+      return proto.steps;
+    }
+
+    function normalizeBatchRecord(batch) {
+      const protocol = batch && batch.protocol && BANCADA_PROTOCOLS[batch.protocol] ? batch.protocol : 'slide';
+      const customStages = Array.isArray(batch.customStages)
+        ? batch.customStages.map(s => String(s).trim()).filter(Boolean)
+        : [];
+      const temp = { ...batch, protocol, customStages };
+      const steps = getBatchSteps(temp);
+      const maxIdx = Math.max(0, steps.length - 1);
+      const rawStage = parseInt(batch.stage, 10);
+      const stage = Number.isNaN(rawStage) ? 0 : Math.min(maxIdx, Math.max(0, rawStage));
+      return {
+        ...temp,
+        stage,
+        mountingMedium: batch.mountingMedium || 'Berlese',
+        females: Math.max(0, parseInt(batch.females, 10) || 0),
+        males: Math.max(0, parseInt(batch.males, 10) || 0)
+      };
+    }
 
     const CATEGORY_STYLES = {
       'Bancada': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
@@ -460,18 +574,19 @@
       };
 
       return {
-        version: '3.1',
+        version: '3.2',
         activeTab: 'agenda',
         agendaView: 'list',
         agendaCategoryFilter: 'Todas',
         agendaPriorityFilter: 'Todas',
-        bancadaStageFilter: 'Todas',
+        bancadaProtocolFilter: 'Todos',
+        bancadaStatusFilter: 'Todos',
         pesquisaTypeFilter: 'Todos',
         pesquisaStatusFilter: 'Todos',
         arquivosCategoryFilter: 'Todos',
         lastBackupAt: null,
         hasUnsavedBackupChanges: true,
-        scratchpad: `[Bancada - 09:40]\nLote LOT-2026-014 (CDC borda de mata - Pres. Figueiredo):\n- Fêmea ♀ #03: dutos individuais da espermateca estriados, cabeça da espermateca bilobada -> Nyssomyia umbratilis.\n- Verificar proporção palpômero V / III (esperado > 1.2).\n\n[SIG / SINAN]\nChecar código IBGE 130353 (Presidente Figueiredo) vs 1303536 na tabela de notificações LTA.`,
+        scratchpad: `[Bancada - 09:40]\nLote LOT-2026-014 (CDC borda de mata - Pres. Figueiredo):\n- Fêmea ♀ #03: dutos individuais da espermateca estriados, cabeça da espermateca bilobada -> Nyssomyia umbratilis.\n- Verificar proporção palpômero V / III (esperado > 1.2).\n\n[Culicídeos - Lupa]\nLote LOT-2026-009 (Anopheles darlingi): conferir banda branca basal no tarsômero posterior 2 e escamas claras na costa.\n\n[SIG / SINAN]\nChecar código IBGE 130353 (Presidente Figueiredo) vs 1303536 na tabela de notificações LTA.`,
         tasks: [
           {
             id: 't-1',
@@ -543,6 +658,8 @@
           {
             id: 'b-1',
             code: 'LOT-2026-014',
+            protocol: 'slide',
+            customStages: [],
             targetGroup: 'Nyssomyia umbratilis (Phlebotominae)',
             municipality: 'Presidente Figueiredo - AM (Ramal Morena)',
             coordinates: '-2.0451, -60.0234',
@@ -555,18 +672,22 @@
           {
             id: 'b-2',
             code: 'LOT-2026-009',
+            protocol: 'stereo',
+            customStages: [],
             targetGroup: 'Anopheles (Nyssorhynchus) darlingi',
             municipality: 'Manaus - AM (Tarumã-Açu)',
             coordinates: '-2.9812, -60.0945',
             mountingMedium: 'Alfinetado',
             females: 15,
             males: 3,
-            stage: 3,
-            notes: 'Conferir manchas claras nos tarsômeros posteriores 3-5 e escamas da veia costal.'
+            stage: 2,
+            notes: 'Identificação direta em estereomicroscópio (sem clarificação): tarsômeros posteriores 3-5 brancos e manchas costais características.'
           },
           {
             id: 'b-3',
             code: 'LOT-2026-021',
+            protocol: 'slide',
+            customStages: [],
             targetGroup: 'Lutzomyia spp. (Phlebotominae)',
             municipality: 'Rio Preto da Eva - AM (ZF-09)',
             coordinates: '-2.6984, -59.7012',
@@ -579,14 +700,16 @@
           {
             id: 'b-4',
             code: 'LOT-2026-018',
-            targetGroup: 'Culicidae / Phlebotominae',
+            protocol: 'quick',
+            customStages: [],
+            targetGroup: 'Culicidae / Phlebotominae (Triagem Bruta)',
             municipality: 'Presidente Figueiredo - AM (Ponto CDC-04)',
             coordinates: '-2.0510, -60.0198',
             mountingMedium: 'Álcool 70%',
             females: 41,
             males: 21,
             stage: 0,
-            notes: 'Material bruto recém-chegado de campo; separar dípteros hematófagos de micro-himenópteros.'
+            notes: 'Material bruto recém-chegado de campo; separar dípteros hematófagos por morfotipo em tubos.'
           }
         ],
         sigProjects: [
@@ -749,17 +872,42 @@
 
     function loadState() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        let raw = localStorage.getItem(STORAGE_KEY);
+        let migratedFromLegacy = false;
+
+        if (!raw) {
+          for (const legacyKey of LEGACY_STORAGE_KEYS) {
+            const candidate = localStorage.getItem(legacyKey);
+            if (candidate) {
+              raw = candidate;
+              migratedFromLegacy = true;
+              break;
+            }
+          }
+        }
+
         if (!raw) {
           const initial = getDefaultSeedData();
+          initial.batches = initial.batches.map(normalizeBatchRecord);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
           return initial;
         }
+
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') {
           return getDefaultSeedData();
         }
-        return { ...getDefaultSeedData(), ...parsed };
+
+        const merged = { ...getDefaultSeedData(), ...parsed, version: '3.2' };
+        merged.batches = Array.isArray(merged.batches)
+          ? merged.batches.map(normalizeBatchRecord)
+          : getDefaultSeedData().batches.map(normalizeBatchRecord);
+
+        if (migratedFromLegacy) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        }
+
+        return merged;
       } catch (err) {
         console.error('Erro ao ler localStorage:', err);
         return getDefaultSeedData();
@@ -1006,11 +1154,11 @@
         const yyyy = now.getFullYear();
         const mm = String(now.getMonth() + 1).padStart(2, '0');
         const dd = String(now.getDate()).padStart(2, '0');
-        const filename = `biomap-lab-backup-${yyyy}-${mm}-${dd}.json`;
+        const filename = `biomap_lab_backup_${yyyy}-${mm}-${dd}.json`;
 
         const payload = {
           app: 'BioMap Lab',
-          version: '3.1',
+          version: '3.2',
           exportedAt: now.toISOString(),
           data: {
             scratchpad: state.scratchpad || '',
@@ -1175,11 +1323,12 @@
     function applyImportedBackup(mode) {
       if (!pendingImportedPayload) return;
       const incoming = pendingImportedPayload.data;
+      const normalizedIncomingBatches = (incoming.batches || []).map(normalizeBatchRecord);
 
       if (mode === 'replace') {
         state.scratchpad = incoming.scratchpad;
         state.tasks = incoming.tasks;
-        state.batches = incoming.batches;
+        state.batches = normalizedIncomingBatches;
         state.sigProjects = incoming.sigProjects;
         state.sigLogs = incoming.sigLogs;
         state.references = incoming.references;
@@ -1189,7 +1338,7 @@
       } else {
         // Mesclar: atualiza existentes por ID, adiciona novos e concatena notas rápidas se diferentes
         state.tasks = mergeById(state.tasks, incoming.tasks);
-        state.batches = mergeById(state.batches, incoming.batches);
+        state.batches = mergeById(state.batches, normalizedIncomingBatches);
         state.sigProjects = mergeById(state.sigProjects, incoming.sigProjects);
         state.sigLogs = mergeById(state.sigLogs, incoming.sigLogs);
         state.references = mergeById(state.references, incoming.references);
@@ -1454,7 +1603,9 @@
 
       state.batches.forEach(b => {
         if (`${b.code} ${b.targetGroup} ${b.municipality} ${b.notes}`.toLowerCase().includes(q)) {
-          results.push({ tab: 'bancada', badge: 'Bancada', title: `${b.code} — ${b.targetGroup}`, sub: `${b.municipality} • ${BANCADA_STAGES[b.stage]}` });
+          const steps = getBatchSteps(b);
+          const stageLabel = steps[b.stage] || 'Em processamento';
+          results.push({ tab: 'bancada', badge: 'Bancada', title: `${b.code} — ${b.targetGroup}`, sub: `${b.municipality} • ${stageLabel}` });
         }
       });
 
@@ -1518,123 +1669,712 @@
     });
 
     // =========================================================================
-    // 7. LEITOR DIVIDIDO DE PDF (SPLIT-SCREEN READER + MARCADOR DE PÁGINA)
+    // 7. ORQUESTRADOR PRINCIPAL DE RENDERIZAÇÃO (renderApp)
     // =========================================================================
-    async function openPdfReaderModal(kind, itemId) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === itemId)
-        : state.references.find(r => r.id === itemId);
+    const TAB_TITLES = {
+      agenda: 'Visão Geral & Agenda',
+      bancada: 'Bancada & Lâminas',
+      sig: 'Dados & SIG (Epidemiologia)',
+      pesquisa: 'Pesquisa, Chaves & Artigos',
+      arquivos: 'Arquivos, Fotos & Pranchas',
+      campo: 'Saída de Campo & Marcos'
+    };
 
-      if (!item || !item.pdfId) {
-        showToast('Nenhum PDF vinculado a este item.', 'error');
-        return;
+    function renderApp() {
+      const activeTab = state.activeTab || 'agenda';
+
+      // Atualiza título e data do cabeçalho
+      const titleEl = document.getElementById('header-title');
+      if (titleEl) {
+        titleEl.textContent = TAB_TITLES[activeTab] || 'BioMap Lab';
       }
 
-      const fileRecord = await idbGetFile(item.pdfId);
-      if (!fileRecord || !fileRecord.blob) {
-        showToast('Arquivo PDF não encontrado localmente neste PC. Clique em "Reanexar PDF local".', 'error');
+      const dateEl = document.getElementById('header-date');
+      if (dateEl) {
+        try {
+          const formattedDate = new Date().toLocaleDateString('pt-BR', {
+            weekday: 'long',
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric'
+          });
+          dateEl.textContent = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+        } catch (e) {
+          dateEl.textContent = '';
+        }
+      }
+
+      // Atualiza destaque dos botões de navegação na barra lateral
+      document.querySelectorAll('.nav-btn').forEach((btn) => {
+        const isCurrent = btn.getAttribute('data-nav') === activeTab;
+        btn.className = `nav-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
+          isCurrent
+            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 shadow-xs'
+            : 'text-slate-400 hover:text-white hover:bg-slate-800/70 border border-transparent'
+        }`;
+      });
+
+      // Atualiza contadores e indicadores laterais
+      const pendingTasks = state.tasks.filter(t => t.status !== 'done').length;
+      const doneTasks = state.tasks.filter(t => t.status === 'done').length;
+      const totalTasks = state.tasks.length;
+
+      const activeBatches = state.batches.filter(b => {
+        const steps = getBatchSteps(b);
+        return b.stage < steps.length - 1;
+      }).length;
+
+      const totalSpecimens = state.batches.reduce(
+        (acc, b) => acc + (Number(b.females) || 0) + (Number(b.males) || 0),
+        0
+      );
+
+      const openSigLogs = state.sigLogs.filter(l => !l.resolved).length;
+      const avgMilestonePct = state.milestones.length
+        ? Math.round(state.milestones.reduce((acc, m) => acc + (Number(m.progress) || 0), 0) / state.milestones.length)
+        : 0;
+
+      const overallPct = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+      const setBadge = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+      };
+
+      setBadge('badge-agenda', pendingTasks);
+      setBadge('badge-bancada', activeBatches);
+      setBadge('badge-sig', openSigLogs);
+      setBadge('badge-pesquisa', state.references.length);
+      setBadge('badge-arquivos', state.vaultMeta.length);
+      setBadge('badge-campo', `${avgMilestonePct}%`);
+
+      const pctEl = document.getElementById('sidebar-overall-pct');
+      const barEl = document.getElementById('sidebar-overall-bar');
+      const specEl = document.getElementById('sidebar-specimen-summary');
+      if (pctEl) pctEl.textContent = `${overallPct}%`;
+      if (barEl) barEl.style.width = `${overallPct}%`;
+      if (specEl) specEl.textContent = `${totalSpecimens} espécime(s) em ${state.batches.length} lote(s)`;
+
+      updateBackupStatusUI();
+
+      // Renderiza o módulo ativo
+      const mainEl = document.getElementById('main-content');
+      if (!mainEl) return;
+
+      switch (activeTab) {
+        case 'bancada':
+          mainEl.innerHTML = renderBancadaTab();
+          break;
+        case 'sig':
+          mainEl.innerHTML = renderSigTab();
+          break;
+        case 'pesquisa':
+          mainEl.innerHTML = renderPesquisaTab();
+          break;
+        case 'arquivos':
+          mainEl.innerHTML = renderArquivosTab();
+          break;
+        case 'campo':
+          mainEl.innerHTML = renderCampoTab();
+          break;
+        case 'agenda':
+        default:
+          mainEl.innerHTML = renderAgendaTab();
+          break;
+      }
+    }
+
+    // =========================================================================
+    // MÓDULO 1: VISÃO GERAL & AGENDA (LISTA, KANBAN & LEITURA DE PDF)
+    // =========================================================================
+    function renderAgendaTab() {
+      const categories = ['Todas', 'Bancada', 'SIG / Epidemio', 'Pesquisa & Leitura', 'Graduação', 'Pós-Graduação'];
+      const priorities = ['Todas', 'Alta', 'Média', 'Baixa'];
+
+      const filteredTasks = state.tasks.filter(t => {
+        const catOk = state.agendaCategoryFilter === 'Todas' || t.category === state.agendaCategoryFilter;
+        const prioOk = state.agendaPriorityFilter === 'Todas' || t.priority === state.agendaPriorityFilter;
+        return catOk && prioOk;
+      });
+
+      const pendingCount = state.tasks.filter(t => t.status !== 'done').length;
+      const doneCount = state.tasks.filter(t => t.status === 'done').length;
+      const totalSpecimens = state.batches.reduce((s, b) => s + (Number(b.females) || 0) + (Number(b.males) || 0), 0);
+      const openLogs = state.sigLogs.filter(l => !l.resolved).length;
+      const pdfCount = state.tasks.filter(t => t.pdfName).length + state.references.filter(r => r.pdfName).length;
+
+      return `
+        <!-- Indicadores Rápidos (KPIs) -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800/90">
+            <p class="text-[11px] text-slate-400">Tarefas & Prazos</p>
+            <div class="flex items-baseline justify-between mt-1">
+              <span class="text-xl font-bold font-mono text-white">${pendingCount} <span class="text-xs font-normal text-slate-400">pendentes</span></span>
+              <span class="text-[11px] font-mono text-emerald-400">${doneCount} feitas</span>
+            </div>
+          </div>
+
+          <div onclick="switchTab('bancada')" class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-emerald-500/40 cursor-pointer transition-colors">
+            <p class="text-[11px] text-slate-400">Bancada Entomológica</p>
+            <div class="flex items-baseline justify-between mt-1">
+              <span class="text-xl font-bold font-mono text-emerald-400">${state.batches.length} <span class="text-xs font-normal text-slate-400">lotes</span></span>
+              <span class="text-[11px] font-mono text-slate-300">${totalSpecimens} ind.</span>
+            </div>
+          </div>
+
+          <div onclick="switchTab('sig')" class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 cursor-pointer transition-colors">
+            <p class="text-[11px] text-slate-400">Dados & SIG</p>
+            <div class="flex items-baseline justify-between mt-1">
+              <span class="text-xl font-bold font-mono text-cyan-400">${state.sigProjects.length} <span class="text-xs font-normal text-slate-400">fluxos</span></span>
+              <span class="text-[11px] font-mono text-amber-300">${openLogs} logs</span>
+            </div>
+          </div>
+
+          <div onclick="switchTab('pesquisa')" class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-violet-500/40 cursor-pointer transition-colors">
+            <p class="text-[11px] text-slate-400">Leituras & PDFs</p>
+            <div class="flex items-baseline justify-between mt-1">
+              <span class="text-xl font-bold font-mono text-violet-400">${pdfCount} <span class="text-xs font-normal text-slate-400">PDFs</span></span>
+              <span class="text-[11px] font-mono text-slate-300">${state.references.length} refs</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Barra de Criação Rápida + Botão Completo com PDF -->
+        <section class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-white">Agenda de Atividades & Leituras Técnicas</h3>
+              <p class="text-xs text-slate-400">Crie tarefas rápidas ou anexe artigos em PDF com marcador de página.</p>
+            </div>
+            <button onclick="openTaskModal()" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer">
+              <span>+ Nova Tarefa / Leitura PDF</span>
+            </button>
+          </div>
+
+          <form onsubmit="quickAddTask(event)" class="flex flex-col sm:flex-row gap-2">
+            <input id="quick-task-title" type="text" required placeholder="Adicionar tarefa rápida (ex.: Conferir lâminas do lote LOT-2026-014)..." class="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500/60 text-xs text-white placeholder-slate-500 outline-none" />
+            <select id="quick-task-cat" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 outline-none">
+              ${Object.keys(CATEGORY_STYLES).map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+            <select id="quick-task-prio" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 outline-none">
+              <option value="Alta">Alta</option>
+              <option value="Média" selected>Média</option>
+              <option value="Baixa">Baixa</option>
+            </select>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-emerald-300 transition-colors cursor-pointer">
+              Adicionar
+            </button>
+          </form>
+
+          <!-- Filtros e Alternância Lista / Kanban -->
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${categories.map(cat => `
+                <button onclick="setAgendaCategoryFilter('${cat}')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${state.agendaCategoryFilter === cat ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'}">
+                  ${escapeHTML(cat)}
+                </button>
+              `).join('')}
+            </div>
+
+            <div class="flex items-center gap-2 self-start lg:self-auto">
+              <select onchange="setAgendaPriorityFilter(this.value)" class="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 outline-none">
+                ${priorities.map(p => `<option value="${p}" ${state.agendaPriorityFilter === p ? 'selected' : ''}>Prioridade: ${p}</option>`).join('')}
+              </select>
+
+              <div class="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+                <button onclick="setAgendaView('list')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${state.agendaView === 'list' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}">
+                  Lista
+                </button>
+                <button onclick="setAgendaView('kanban')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${state.agendaView === 'kanban' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}">
+                  Kanban
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Conteúdo Principal: Lista ou Quadro Kanban -->
+        ${state.agendaView === 'kanban' ? renderAgendaKanban(filteredTasks) : renderAgendaList(filteredTasks)}
+      `;
+    }
+
+    function renderAgendaList(tasks) {
+      if (tasks.length === 0) {
+        return `
+          <div class="p-10 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center text-xs text-slate-400">
+            Nenhuma tarefa encontrada neste filtro.
+          </div>
+        `;
+      }
+
+      const ordered = [
+        ...tasks.filter(t => t.status === 'doing'),
+        ...tasks.filter(t => t.status === 'todo'),
+        ...tasks.filter(t => t.status === 'done')
+      ];
+
+      return `
+        <section class="space-y-3">
+          ${ordered.map(t => renderTaskCard(t, false)).join('')}
+        </section>
+      `;
+    }
+
+    function renderAgendaKanban(tasks) {
+      const cols = [
+        { id: 'todo', title: 'A Fazer', accent: 'text-slate-200 border-slate-700' },
+        { id: 'doing', title: 'Em Andamento', accent: 'text-cyan-300 border-cyan-500/40' },
+        { id: 'done', title: 'Concluído', accent: 'text-emerald-300 border-emerald-500/40' }
+      ];
+
+      return `
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          ${cols.map(col => {
+            const colTasks = tasks.filter(t => t.status === col.id);
+            return `
+              <div
+                ondragover="onTaskDragOver(event)"
+                ondrop="onTaskDrop(event, '${col.id}')"
+                class="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 min-h-[18rem] flex flex-col gap-3"
+              >
+                <div class="flex items-center justify-between pb-2 border-b ${col.accent}">
+                  <h4 class="text-xs font-bold uppercase tracking-wider">${col.title}</h4>
+                  <span class="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-950 text-slate-300 border border-slate-800">${colTasks.length}</span>
+                </div>
+                <div class="space-y-2.5 flex-1">
+                  ${colTasks.length === 0
+                    ? `<p class="text-[11px] text-slate-500 text-center py-8 border border-dashed border-slate-800/80 rounded-xl">Arraste uma tarefa para cá</p>`
+                    : colTasks.map(t => renderTaskCard(t, true)).join('')}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </section>
+      `;
+    }
+
+    function renderTaskCard(task, compact = false) {
+      const isDone = task.status === 'done';
+      const catStyle = CATEGORY_STYLES[task.category] || 'bg-slate-800 text-slate-300 border-slate-700';
+      const prioStyle = PRIORITY_STYLES[task.priority] || 'bg-slate-800 text-slate-300 border-slate-700';
+      const hasPdfMeta = Boolean(task.pdfName || task.pdfId);
+      const hasLocalPdfBlob = Boolean(task.pdfId && existingVaultIds.has(task.pdfId));
+      const curPage = Math.max(1, parseInt(task.currentPage, 10) || 1);
+      const totPages = Math.max(curPage, parseInt(task.totalPages, 10) || 1);
+      const readPct = Math.min(100, Math.round((curPage / totPages) * 100));
+
+      return `
+        <article
+          draggable="true"
+          ondragstart="onTaskDragStart(event, '${task.id}')"
+          class="p-4 rounded-2xl bg-slate-900 border ${isDone ? 'border-slate-800/60 opacity-70' : 'border-slate-800 hover:border-slate-700'} space-y-2.5 transition-all"
+        >
+          <div class="flex items-start justify-between gap-2.5">
+            <label class="flex items-start gap-2.5 cursor-pointer flex-1 min-w-0">
+              <input type="checkbox" ${isDone ? 'checked' : ''} onchange="toggleTaskDone('${task.id}')" class="mt-1 rounded bg-slate-950 border-slate-700 text-emerald-500 cursor-pointer" />
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-1.5 mb-1">
+                  <span class="text-[10px] font-medium px-2 py-0.5 rounded border ${catStyle}">${escapeHTML(task.category)}</span>
+                  <span class="text-[10px] font-medium px-2 py-0.5 rounded border ${prioStyle}">${escapeHTML(task.priority)}</span>
+                  ${task.dueDate ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">📅 ${escapeHTML(formatDateBR(task.dueDate))}</span>` : ''}
+                </div>
+                <h4 class="text-xs sm:text-sm font-semibold ${isDone ? 'line-through text-slate-500' : 'text-white'} leading-snug">${escapeHTML(task.title)}</h4>
+              </div>
+            </label>
+
+            <div class="flex items-center gap-1 shrink-0">
+              <button onclick="openTaskModal('${task.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800" title="Editar tarefa">✎</button>
+              <button onclick="deleteTask('${task.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Excluir tarefa">✕</button>
+            </div>
+          </div>
+
+          ${task.notes ? `<p class="text-xs text-slate-400 leading-relaxed pl-6">${escapeHTML(task.notes)}</p>` : ''}
+
+          <!-- Anexo PDF & Marcador de Página -->
+          ${hasPdfMeta ? `
+            <div class="ml-0 sm:ml-6 p-3 rounded-xl bg-slate-950/90 border border-cyan-500/25 space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs font-mono text-cyan-200 truncate">📄 ${escapeHTML(task.pdfName)}</span>
+                <div class="flex items-center gap-1.5">
+                  <button onclick="stepItemPage('task', '${task.id}', -1)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-200">-1</button>
+                  <span class="text-xs font-mono text-emerald-300 px-1.5">Pág. ${curPage} / ${totPages} (${readPct}%)</span>
+                  <button onclick="stepItemPage('task', '${task.id}', 1)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-200">+1</button>
+                  ${hasLocalPdfBlob ? `
+                    <button onclick="openPdfReaderModal('task', '${task.id}')" class="ml-1 px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-semibold text-cyan-200 cursor-pointer">
+                      Abrir PDF
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+
+              <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 rounded-full" style="width: ${readPct}%"></div>
+              </div>
+
+              ${!hasLocalPdfBlob ? `
+                <div class="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-amber-200">
+                  <span>PDF vinculado: <strong class="font-mono">${escapeHTML(task.pdfName)}</strong> (pág. <strong>${curPage}</strong> sincronizada).</span>
+                  <button onclick="triggerReattachLocalPdf('task', '${task.id}')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold shrink-0 cursor-pointer">
+                    Reanexar PDF local
+                  </button>
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <!-- Botões de Status Rápido (Kanban / Mobile) -->
+          ${compact ? `
+            <div class="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-800/70">
+              ${task.status !== 'todo' ? `<button onclick="setTaskStatus('${task.id}', 'todo')" class="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 hover:text-white">A Fazer</button>` : ''}
+              ${task.status !== 'doing' ? `<button onclick="setTaskStatus('${task.id}', 'doing')" class="px-2 py-0.5 rounded bg-cyan-500/15 text-[10px] text-cyan-300 hover:bg-cyan-500/25">Em Andamento</button>` : ''}
+              ${task.status !== 'done' ? `<button onclick="setTaskStatus('${task.id}', 'done')" class="px-2 py-0.5 rounded bg-emerald-500/15 text-[10px] text-emerald-300 hover:bg-emerald-500/25">Concluir</button>` : ''}
+            </div>
+          ` : ''}
+        </article>
+      `;
+    }
+
+    function quickAddTask(event) {
+      event.preventDefault();
+      const titleInput = document.getElementById('quick-task-title');
+      const title = (titleInput?.value || '').trim();
+      if (!title) return;
+
+      const category = document.getElementById('quick-task-cat')?.value || 'Bancada';
+      const priority = document.getElementById('quick-task-prio')?.value || 'Média';
+
+      state.tasks.unshift({
+        id: 't-' + Date.now(),
+        title,
+        category,
+        priority,
+        status: 'todo',
+        dueDate: new Date().toISOString().split('T')[0],
+        notes: '',
+        pdfId: '',
+        pdfName: '',
+        currentPage: 1,
+        totalPages: 1
+      });
+
+      saveState(true);
+      renderApp();
+      showToast('Tarefa adicionada!', 'success');
+    }
+
+    function setAgendaCategoryFilter(cat) {
+      state.agendaCategoryFilter = cat;
+      saveState(false);
+      renderApp();
+    }
+
+    function setAgendaPriorityFilter(prio) {
+      state.agendaPriorityFilter = prio;
+      saveState(false);
+      renderApp();
+    }
+
+    function setAgendaView(view) {
+      state.agendaView = view;
+      saveState(false);
+      renderApp();
+    }
+
+    function toggleTaskDone(id) {
+      const task = state.tasks.find(t => t.id === id);
+      if (!task) return;
+      task.status = task.status === 'done' ? 'todo' : 'done';
+      saveState(true);
+      renderApp();
+    }
+
+    function setTaskStatus(id, status) {
+      const task = state.tasks.find(t => t.id === id);
+      if (!task) return;
+      task.status = status;
+      saveState(true);
+      renderApp();
+    }
+
+    function deleteTask(id) {
+      state.tasks = state.tasks.filter(t => t.id !== id);
+      saveState(true);
+      renderApp();
+      showToast('Tarefa removida.', 'info');
+    }
+
+    let draggedTaskId = null;
+    function onTaskDragStart(event, taskId) {
+      draggedTaskId = taskId;
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', taskId);
+      }
+    }
+
+    function onTaskDragOver(event) {
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    }
+
+    function onTaskDrop(event, targetStatus) {
+      event.preventDefault();
+      const id = draggedTaskId || event.dataTransfer?.getData('text/plain');
+      if (id) {
+        setTaskStatus(id, targetStatus);
+        draggedTaskId = null;
+      }
+    }
+
+    function openTaskModal(editId = null) {
+      const task = editId ? state.tasks.find(t => t.id === editId) : null;
+      const pdfVaultItems = state.vaultMeta.filter(m => m.type === 'application/pdf' || (m.name || '').toLowerCase().endsWith('.pdf'));
+
+      openModal(`
+        <form onsubmit="saveTaskFromModal(event, '${editId || ''}')" class="p-5 sm:p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 class="text-base font-bold text-white">${task ? 'Editar Tarefa / Leitura' : 'Nova Tarefa / Leitura PDF'}</h3>
+            <button type="button" onclick="closeModal()" class="text-slate-400 hover:text-white">✕</button>
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-300 mb-1">Título da Tarefa ou Leitura *</label>
+            <input id="task-title" type="text" required value="${escapeHTML(task?.title || '')}" placeholder="Ex.: Fichar artigo sobre distribuição espacial de flebotomíneos" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none" />
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-300 mb-1">Categoria</label>
+              <select id="task-cat" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
+                ${Object.keys(CATEGORY_STYLES).map(c => `<option value="${c}" ${task?.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-300 mb-1">Prioridade</label>
+              <select id="task-prio" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
+                ${['Alta', 'Média', 'Baixa'].map(p => `<option value="${p}" ${(task?.priority || 'Média') === p ? 'selected' : ''}>${p}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-300 mb-1">Status</label>
+              <select id="task-status" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
+                <option value="todo" ${(task?.status || 'todo') === 'todo' ? 'selected' : ''}>A Fazer</option>
+                <option value="doing" ${task?.status === 'doing' ? 'selected' : ''}>Em Andamento</option>
+                <option value="done" ${task?.status === 'done' ? 'selected' : ''}>Concluído</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-300 mb-1">Prazo / Data</label>
+              <input id="task-due" type="date" value="${escapeHTML(task?.dueDate || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
+            </div>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 space-y-3">
+            <span class="block text-xs font-semibold text-cyan-300">📄 Anexo de Artigo / Manual em PDF & Marcador de Página</span>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <input id="task-pdf-file" type="file" accept="application/pdf,.pdf" class="w-full text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-500/20 file:text-cyan-200" />
+              <select id="task-pdf-existing" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 outline-none">
+                <option value="">-- Ou PDF já salvo no Cofre --</option>
+                ${pdfVaultItems.map(p => `<option value="${p.id}" ${task?.pdfId === p.id ? 'selected' : ''}>${escapeHTML(p.title || p.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] text-slate-300 mb-1">Página Atual</label>
+                <input id="task-cur-page" type="number" min="1" value="${task?.currentPage || 1}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-300 mb-1">Total de Páginas</label>
+                <input id="task-tot-page" type="number" min="1" value="${task?.totalPages || 1}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-300 mb-1">Anotações / Detalhes</label>
+            <textarea id="task-notes" rows="3" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">${escapeHTML(task?.notes || '')}</textarea>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300">Cancelar</button>
+            <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-slate-950">Salvar Tarefa</button>
+          </div>
+        </form>
+      `, 'max-w-xl');
+    }
+
+    async function saveTaskFromModal(event, editId) {
+      event.preventDefault();
+      const title = document.getElementById('task-title').value.trim();
+      if (!title) return;
+
+      const category = document.getElementById('task-cat').value;
+      const priority = document.getElementById('task-prio').value;
+      const status = document.getElementById('task-status').value;
+      const dueDate = document.getElementById('task-due').value;
+      const notes = document.getElementById('task-notes').value.trim();
+      const currentPage = Math.max(1, parseInt(document.getElementById('task-cur-page').value, 10) || 1);
+      const totalPages = Math.max(currentPage, parseInt(document.getElementById('task-tot-page').value, 10) || 1);
+
+      const fileInput = document.getElementById('task-pdf-file');
+      const existingSelect = document.getElementById('task-pdf-existing');
+      const uploadedFile = fileInput && fileInput.files && fileInput.files[0];
+
+      const existingTask = editId ? state.tasks.find(t => t.id === editId) : null;
+      let pdfId = existingTask ? existingTask.pdfId : '';
+      let pdfName = existingTask ? existingTask.pdfName : '';
+
+      if (uploadedFile) {
+        const meta = await storeFileInVault(uploadedFile, { title });
+        pdfId = meta.id;
+        pdfName = uploadedFile.name;
+      } else if (existingSelect && existingSelect.value) {
+        const sel = state.vaultMeta.find(m => m.id === existingSelect.value);
+        if (sel) {
+          pdfId = sel.id;
+          pdfName = sel.name;
+        }
+      }
+
+      if (existingTask) {
+        Object.assign(existingTask, { title, category, priority, status, dueDate, notes, pdfId, pdfName, currentPage, totalPages });
+      } else {
+        state.tasks.unshift({
+          id: 't-' + Date.now(),
+          title,
+          category,
+          priority,
+          status,
+          dueDate,
+          notes,
+          pdfId,
+          pdfName,
+          currentPage,
+          totalPages
+        });
+      }
+
+      saveState(true);
+      closeModal();
+      renderApp();
+      showToast('Tarefa salva com sucesso!', 'success');
+    }
+
+    // =========================================================================
+    // 8. LEITOR DIVIDIDO DE PDF, MARCADOR DE PÁGINAS & REANEXAÇÃO LOCAL
+    // =========================================================================
+    function getPdfHostItem(kind, id) {
+      if (kind === 'task') return state.tasks.find(t => t.id === id) || null;
+      if (kind === 'ref') return state.references.find(r => r.id === id) || null;
+      return null;
+    }
+
+    function stepItemPage(kind, id, delta) {
+      const item = getPdfHostItem(kind, id);
+      if (!item) return;
+      const tot = Math.max(1, parseInt(item.totalPages, 10) || 1);
+      const cur = Math.max(1, parseInt(item.currentPage, 10) || 1);
+      item.currentPage = Math.min(tot, Math.max(1, cur + delta));
+      saveState(true);
+      renderApp();
+    }
+
+    async function openPdfReaderModal(kind, id) {
+      const item = getPdfHostItem(kind, id);
+      if (!item || !item.pdfId) return;
+
+      const record = await idbGetFile(item.pdfId);
+      if (!record || !record.blob) {
+        showToast('PDF não encontrado neste computador. Selecione o arquivo local para reanexar.', 'info');
+        triggerReattachLocalPdf(kind, id);
         return;
       }
 
       if (activeReaderObjectUrl) {
         URL.revokeObjectURL(activeReaderObjectUrl);
       }
-      activeReaderObjectUrl = URL.createObjectURL(fileRecord.blob);
+      activeReaderObjectUrl = URL.createObjectURL(record.blob);
 
-      const currentPage = Math.max(1, parseInt(item.currentPage, 10) || 1);
-      const totalPages = Math.max(currentPage, parseInt(item.totalPages, 10) || 1);
-      const pct = Math.min(100, Math.round((currentPage / totalPages) * 100));
+      const curPage = Math.max(1, parseInt(item.currentPage, 10) || 1);
+      const totPages = Math.max(curPage, parseInt(item.totalPages, 10) || 1);
+      const pct = Math.min(100, Math.round((curPage / totPages) * 100));
 
       const html = `
-        <div class="flex flex-col h-[88vh]">
-          <!-- Barra Superior do Leitor -->
-          <div class="px-4 py-3 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-3 shrink-0">
+        <div class="p-4 sm:p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">Leitor PDF Integrado</span>
-                <span class="text-xs font-mono text-slate-400 truncate">${escapeHTML(item.pdfName || fileRecord.name)}</span>
-              </div>
-              <h3 class="text-sm font-bold text-white truncate mt-0.5">${escapeHTML(item.title)}</h3>
+              <span class="text-[10px] font-mono uppercase tracking-wider text-cyan-400">Leitor Dividido de PDF</span>
+              <h3 class="text-sm sm:text-base font-bold text-white truncate">${escapeHTML(item.title)}</h3>
             </div>
-            <button onclick="closeModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 shrink-0">Fechar Leitor ✕</button>
+            <div class="flex items-center gap-2">
+              <a href="${activeReaderObjectUrl}" target="_blank" rel="noopener" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-cyan-300">Abrir em Nova Aba ↗</a>
+              <button onclick="closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">✕</button>
+            </div>
           </div>
 
-          <!-- Corpo Dividido (Split-Screen) -->
-          <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0">
-            <!-- Esquerda: Visualizador PDF -->
-            <div class="lg:col-span-8 bg-slate-950 border-b lg:border-b-0 lg:border-r border-slate-800 flex flex-col min-h-[45vh]">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <!-- Visualizador PDF -->
+            <div class="lg:col-span-8">
               <iframe
                 id="pdf-reader-iframe"
-                src="${activeReaderObjectUrl}#page=${currentPage}"
-                class="w-full h-full border-0"
+                src="${activeReaderObjectUrl}#page=${curPage}"
+                class="w-full h-[60vh] lg:h-[75vh] rounded-xl border border-slate-800 bg-slate-950"
                 title="Visualizador de PDF"
               ></iframe>
             </div>
 
-            <!-- Direita: Controle de Página & Fichamento -->
-            <div class="lg:col-span-4 p-4 bg-slate-900 flex flex-col justify-between gap-4 overflow-y-auto">
-              <div class="space-y-4">
-                <div class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-semibold text-white">Marcador de Página</span>
-                    <span id="reader-pct-badge" class="text-xs font-mono text-emerald-400 font-semibold">${pct}% lido</span>
-                  </div>
-
-                  <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div id="reader-progress-bar" class="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all" style="width: ${pct}%"></div>
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-2.5">
+            <!-- Painel Lateral de Controle de Página e Fichamento -->
+            <div class="lg:col-span-4 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+              <div class="space-y-3">
+                <div>
+                  <span class="block text-xs font-semibold text-emerald-400 mb-2">Marcador de Leitura</span>
+                  <div class="grid grid-cols-2 gap-2">
                     <div>
-                      <label class="block text-[11px] text-slate-400 mb-1">Página Atual</label>
-                      <input
-                        id="reader-current-page"
-                        type="number"
-                        min="1"
-                        value="${currentPage}"
-                        onchange="updateReaderPage('${kind}', '${item.id}', this.value, false)"
-                        class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-sm font-mono text-white outline-none focus:border-emerald-500"
-                      />
+                      <label class="block text-[10px] text-slate-400 mb-1">Página Atual</label>
+                      <input id="reader-cur-page" type="number" min="1" value="${curPage}" onchange="syncReaderPageFromInputs('${kind}', '${id}')" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-white outline-none" />
                     </div>
                     <div>
-                      <label class="block text-[11px] text-slate-400 mb-1">Total de Páginas</label>
-                      <input
-                        id="reader-total-pages"
-                        type="number"
-                        min="1"
-                        value="${totalPages}"
-                        onchange="updateReaderTotalPages('${kind}', '${item.id}', this.value)"
-                        class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-sm font-mono text-white outline-none focus:border-emerald-500"
-                      />
+                      <label class="block text-[10px] text-slate-400 mb-1">Total de Páginas</label>
+                      <input id="reader-tot-pages" type="number" min="1" value="${totPages}" onchange="syncReaderPageFromInputs('${kind}', '${id}')" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-white outline-none" />
                     </div>
-                  </div>
-
-                  <div class="flex items-center gap-2">
-                    <button onclick="stepReaderPage('${kind}', '${item.id}', -1)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">-1 pág</button>
-                    <button onclick="stepReaderPage('${kind}', '${item.id}', 1)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">+1 pág</button>
-                    <button onclick="jumpReaderToSavedPage('${kind}', '${item.id}')" class="flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-xs font-semibold text-cyan-300">
-                      Ir para Página no Visualizador
-                    </button>
                   </div>
                 </div>
 
-                <div class="space-y-1.5 flex-1 flex flex-col">
-                  <div class="flex items-center justify-between">
-                    <label class="text-xs font-semibold text-white">
-                      ${kind === 'task' ? 'Anotações de Leitura da Tarefa' : 'Caracteres Diagnósticos / Fichamento'}
-                    </label>
-                    <span id="reader-notes-status" class="text-[10px] text-emerald-400">Salvo automaticamente</span>
+                <div class="flex items-center gap-2">
+                  <button type="button" onclick="stepReaderPage('${kind}', '${id}', -1)" class="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">-1 Pág.</button>
+                  <button type="button" onclick="syncReaderPageFromInputs('${kind}', '${id}', true)" class="flex-1 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-semibold text-cyan-200">Ir para Pág.</button>
+                  <button type="button" onclick="stepReaderPage('${kind}', '${id}', 1)" class="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">+1 Pág.</button>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="flex justify-between text-[11px]">
+                    <span class="text-slate-400">Progresso</span>
+                    <span id="reader-pct-label" class="font-mono text-emerald-400 font-semibold">${pct}%</span>
                   </div>
+                  <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="reader-pct-bar" class="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all" style="width: ${pct}%"></div>
+                  </div>
+                </div>
+
+                <div class="pt-2 border-t border-slate-800 flex-1 flex flex-col">
+                  <label class="block text-xs font-semibold text-cyan-300 mb-1.5">Anotações / Caracteres Diagnósticos</label>
                   <textarea
                     rows="10"
-                    oninput="updateReaderNotes('${kind}', '${item.id}', this.value)"
-                    placeholder="Anote caracteres diagnósticos, chaves dicotômicas, páginas de figuras ou trechos metodológicos..."
-                    class="w-full flex-1 bg-slate-950 border border-slate-800 focus:border-emerald-500/60 rounded-xl p-3 text-xs font-mono leading-relaxed text-slate-200 placeholder-slate-600 outline-none resize-none"
+                    oninput="updateReaderNotes('${kind}', '${id}', this.value)"
+                    placeholder="Anote medidas, páginas-chave, citações ou caracteres taxonômicos..."
+                    class="w-full flex-1 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500/50 text-xs text-slate-200 leading-relaxed outline-none resize-none"
                   >${escapeHTML(item.notes || '')}</textarea>
                 </div>
               </div>
 
-              <p class="text-[11px] text-slate-500">Dica: ao fechar o leitor, a página atual e suas anotações ficam salvas e prontas para exportar no backup JSON.</p>
+              <button type="button" onclick="closeModal(); renderApp();" class="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold text-xs">
+                Concluir Sessão de Leitura
+              </button>
             </div>
           </div>
         </div>
@@ -1643,79 +2383,54 @@
       openModal(html, 'max-w-6xl');
     }
 
-    function updateReaderPage(kind, itemId, rawVal, reloadIframe = false) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === itemId)
-        : state.references.find(r => r.id === itemId);
-      if (!item) return;
+    function stepReaderPage(kind, id, delta) {
+      const curInput = document.getElementById('reader-cur-page');
+      const totInput = document.getElementById('reader-tot-pages');
+      if (!curInput || !totInput) return;
+      const tot = Math.max(1, parseInt(totInput.value, 10) || 1);
+      const next = Math.min(tot, Math.max(1, (parseInt(curInput.value, 10) || 1) + delta));
+      curInput.value = next;
+      syncReaderPageFromInputs(kind, id, true);
+    }
 
-      const page = Math.max(1, parseInt(rawVal, 10) || 1);
-      item.currentPage = page;
-      if (item.totalPages && page > item.totalPages) {
-        item.totalPages = page;
-        const totalEl = document.getElementById('reader-total-pages');
-        if (totalEl) totalEl.value = page;
-      }
+    function syncReaderPageFromInputs(kind, id, reloadIframe = false) {
+      const item = getPdfHostItem(kind, id);
+      const curInput = document.getElementById('reader-cur-page');
+      const totInput = document.getElementById('reader-tot-pages');
+      if (!item || !curInput || !totInput) return;
 
-      const curEl = document.getElementById('reader-current-page');
-      if (curEl) curEl.value = page;
+      const tot = Math.max(1, parseInt(totInput.value, 10) || 1);
+      const cur = Math.min(tot, Math.max(1, parseInt(curInput.value, 10) || 1));
+      curInput.value = cur;
+      totInput.value = tot;
 
-      const total = Math.max(1, item.totalPages || 1);
-      const pct = Math.min(100, Math.round((page / total) * 100));
-      const pctBadge = document.getElementById('reader-pct-badge');
-      const bar = document.getElementById('reader-progress-bar');
-      if (pctBadge) pctBadge.textContent = `${pct}% lido`;
-      if (bar) bar.style.width = `${pct}%`;
+      item.currentPage = cur;
+      item.totalPages = tot;
+      saveState(true);
+
+      const pct = Math.min(100, Math.round((cur / tot) * 100));
+      const pctLabel = document.getElementById('reader-pct-label');
+      const pctBar = document.getElementById('reader-pct-bar');
+      if (pctLabel) pctLabel.textContent = `${pct}%`;
+      if (pctBar) pctBar.style.width = `${pct}%`;
 
       if (reloadIframe && activeReaderObjectUrl) {
         const iframe = document.getElementById('pdf-reader-iframe');
         if (iframe) {
-          iframe.src = `${activeReaderObjectUrl}#page=${page}`;
+          iframe.src = `${activeReaderObjectUrl}#page=${cur}`;
         }
       }
+    }
 
+    function updateReaderNotes(kind, id, val) {
+      const item = getPdfHostItem(kind, id);
+      if (!item) return;
+      item.notes = val;
       saveState(true);
-      renderApp();
     }
 
-    function updateReaderTotalPages(kind, itemId, rawVal) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === itemId)
-        : state.references.find(r => r.id === itemId);
-      if (!item) return;
-      item.totalPages = Math.max(1, parseInt(rawVal, 10) || 1);
-      updateReaderPage(kind, itemId, item.currentPage || 1, false);
-    }
-
-    function stepReaderPage(kind, itemId, delta) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === itemId)
-        : state.references.find(r => r.id === itemId);
-      if (!item) return;
-      const next = Math.max(1, (parseInt(item.currentPage, 10) || 1) + delta);
-      updateReaderPage(kind, itemId, next, true);
-    }
-
-    function jumpReaderToSavedPage(kind, itemId) {
-      const curEl = document.getElementById('reader-current-page');
-      const val = curEl ? curEl.value : 1;
-      updateReaderPage(kind, itemId, val, true);
-      showToast(`Visualizador posicionado na página ${val}.`, 'info');
-    }
-
-    function updateReaderNotes(kind, itemId, text) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === itemId)
-        : state.references.find(r => r.id === itemId);
-      if (!item) return;
-      item.notes = text;
-      saveState(true);
-      renderApp();
-    }
-
-    // Reanexar PDF local quando uma tarefa/referência foi importada de outro PC
-    function triggerReattachLocalPdf(kind, itemId) {
-      pendingReattachContext = { kind, id: itemId };
+    function triggerReattachLocalPdf(kind, id) {
+      pendingReattachContext = { kind, id };
       const input = document.getElementById('reattach-pdf-input');
       if (input) {
         input.value = '';
@@ -1728,105 +2443,91 @@
       if (!file || !pendingReattachContext) return;
 
       const { kind, id } = pendingReattachContext;
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === id)
-        : state.references.find(r => r.id === id);
-
-      if (!item) return;
-
-      const meta = await storeFileInVault(file, {
-        id: item.pdfId || undefined,
-        title: item.title
-      });
-
-      item.pdfId = meta.id;
-      item.pdfName = file.name;
-      saveState(true);
+      const item = getPdfHostItem(kind, id);
+      if (item) {
+        const reuseId = item.pdfId || ('file-' + Date.now());
+        await storeFileInVault(file, {
+          id: reuseId,
+          title: item.title || file.name
+        });
+        item.pdfId = reuseId;
+        item.pdfName = file.name;
+        saveState(true);
+        renderApp();
+        showToast(`PDF reanexado na página ${item.currentPage || 1}!`, 'success');
+      }
       pendingReattachContext = null;
-      renderApp();
-      showToast(`PDF "${file.name}" vinculado neste computador (pág. ${item.currentPage || 1} mantida)!`, 'success');
     }
 
     // =========================================================================
-    // 8. VISUALIZADOR ZOOM LIGHTBOX PARA MICROFOTOGRAFIAS E PRANCHAS
+    // 9. LIGHTBOX DE ZOOM PARA MICROFOTOGRAFIAS & DOWNLOAD DE ARQUIVOS
     // =========================================================================
     async function openImageLightbox(fileId) {
-      let url = blobUrlCache.get(fileId);
-      if (!url) {
+      const meta = state.vaultMeta.find(m => m.id === fileId);
+      let imgUrl = blobUrlCache.get(fileId);
+
+      if (!imgUrl) {
         const rec = await idbGetFile(fileId);
         if (rec && rec.blob) {
-          url = URL.createObjectURL(rec.blob);
-          blobUrlCache.set(fileId, url);
+          imgUrl = URL.createObjectURL(rec.blob);
+          blobUrlCache.set(fileId, imgUrl);
         }
       }
 
-      if (!url) {
-        showToast('Imagem não encontrada no armazenamento local deste PC.', 'error');
+      if (!imgUrl) {
+        showToast('Imagem não encontrada localmente neste navegador.', 'error');
         return;
       }
 
-      const meta = state.vaultMeta.find(m => m.id === fileId) || { title: 'Imagem', name: 'imagem.png' };
-      const batch = meta.batchId ? state.batches.find(b => b.id === meta.batchId) : null;
       lightboxZoom = 1;
+      const batch = meta?.batchId ? state.batches.find(b => b.id === meta.batchId) : null;
 
-      const html = `
-        <div class="flex flex-col h-[88vh] bg-slate-950">
-          <div class="px-4 py-3 border-b border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-2 shrink-0">
+      openModal(`
+        <div class="p-4 sm:p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div class="min-w-0">
-              <h3 class="text-sm font-bold text-white truncate">${escapeHTML(meta.title || meta.name)}</h3>
+              <h3 class="text-sm sm:text-base font-bold text-white truncate">${escapeHTML(meta?.title || meta?.name || 'Visualização de Imagem')}</h3>
               <p class="text-[11px] text-slate-400">
-                ${meta.structure ? `<span class="text-emerald-400">${escapeHTML(meta.structure)}</span> • ` : ''}
-                ${meta.magnification ? `<span class="font-mono text-cyan-300">${escapeHTML(meta.magnification)}</span> • ` : ''}
-                ${batch ? `<span class="font-mono text-amber-300">Lote ${escapeHTML(batch.code)}</span>` : 'Cofre de Pranchas'}
+                ${meta?.structure ? `Estrutura: <span class="text-emerald-300">${escapeHTML(meta.structure)}</span> • ` : ''}
+                ${meta?.magnification ? `Aumento: <span class="font-mono text-cyan-300">${escapeHTML(meta.magnification)}</span> • ` : ''}
+                ${batch ? `Lote: <span class="font-mono text-amber-300">${escapeHTML(batch.code)}</span>` : ''}
               </p>
             </div>
+
             <div class="flex items-center gap-1.5">
-              <button onclick="adjustLightboxZoom(-0.25)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">Zoom -</button>
-              <span id="lightbox-zoom-label" class="text-xs font-mono text-cyan-300 px-1.5">100%</span>
-              <button onclick="adjustLightboxZoom(0.25)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-slate-200">Zoom +</button>
-              <button onclick="resetLightboxZoom()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">Ajustar</button>
-              <button onclick="downloadVaultFile('${fileId}')" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-slate-950">Baixar</button>
-              <button onclick="closeModal()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">✕</button>
+              <button onclick="adjustLightboxZoom(-0.25)" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-white">Zoom -</button>
+              <button onclick="resetLightboxZoom()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-cyan-300">100%</button>
+              <button onclick="adjustLightboxZoom(0.25)" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono text-white">Zoom +</button>
+              <button onclick="downloadVaultFile('${fileId}')" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold text-xs">Baixar</button>
+              <button onclick="closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">✕</button>
             </div>
           </div>
 
-          <div class="flex-1 overflow-auto flex items-center justify-center p-4 bg-slate-950">
-            <img
-              id="lightbox-img"
-              src="${url}"
-              alt="${escapeHTML(meta.title || meta.name)}"
-              style="transform: scale(1); transform-origin: center center; transition: transform 0.15s ease;"
-              class="max-h-full max-w-full object-contain rounded-lg shadow-2xl"
-            />
+          <div class="w-full h-[65vh] bg-slate-950 border border-slate-800 rounded-xl overflow-auto flex items-center justify-center p-4">
+            <img id="lightbox-img" src="${imgUrl}" alt="${escapeHTML(meta?.title || 'Imagem')}" class="max-w-full max-h-full object-contain transition-transform duration-150 origin-center" style="transform: scale(1);" />
           </div>
 
-          ${meta.notes ? `
-            <div class="px-4 py-2.5 border-t border-slate-800 bg-slate-900 text-xs text-slate-300 shrink-0">
-              <span class="font-semibold text-cyan-300">Observações:</span> ${escapeHTML(meta.notes)}
-            </div>
-          ` : ''}
+          ${meta?.notes ? `<p class="text-xs text-slate-300 bg-slate-950 p-3 rounded-xl border border-slate-800">${escapeHTML(meta.notes)}</p>` : ''}
         </div>
-      `;
-      openModal(html, 'max-w-5xl');
+      `, 'max-w-5xl');
     }
 
     function adjustLightboxZoom(delta) {
       lightboxZoom = Math.min(4, Math.max(0.5, lightboxZoom + delta));
       const img = document.getElementById('lightbox-img');
-      const label = document.getElementById('lightbox-zoom-label');
       if (img) img.style.transform = `scale(${lightboxZoom})`;
-      if (label) label.textContent = `${Math.round(lightboxZoom * 100)}%`;
     }
 
     function resetLightboxZoom() {
       lightboxZoom = 1;
-      adjustLightboxZoom(0);
+      const img = document.getElementById('lightbox-img');
+      if (img) img.style.transform = 'scale(1)';
     }
 
     async function downloadVaultFile(fileId) {
       const rec = await idbGetFile(fileId);
       if (!rec || !rec.blob) {
-        showToast('Arquivo não encontrado localmente neste navegador.', 'error');
+        showToast('Arquivo local indisponível para download neste dispositivo.', 'error');
         return;
       }
       const url = URL.createObjectURL(rec.blob);
@@ -1840,603 +2541,36 @@
     }
 
     // =========================================================================
-    // 9. RENDERIZAÇÃO PRINCIPAL E ATUALIZAÇÃO DE INDICADORES
-    // =========================================================================
-    function renderApp() {
-      updateNavigationAndBadges();
-      updateBackupStatusUI();
-
-      const main = document.getElementById('main-content');
-      if (!main) return;
-
-      switch (state.activeTab) {
-        case 'agenda':
-          main.innerHTML = renderAgendaTab();
-          break;
-        case 'bancada':
-          main.innerHTML = renderBancadaTab();
-          break;
-        case 'sig':
-          main.innerHTML = renderSigTab();
-          break;
-        case 'pesquisa':
-          main.innerHTML = renderPesquisaTab();
-          break;
-        case 'arquivos':
-          main.innerHTML = renderArquivosTab();
-          break;
-        case 'campo':
-          main.innerHTML = renderCampoTab();
-          break;
-        default:
-          main.innerHTML = renderAgendaTab();
-      }
-    }
-
-    function updateNavigationAndBadges() {
-      const titles = {
-        agenda: 'Visão Geral & Agenda',
-        bancada: 'Bancada & Lâminas (Pipeline)',
-        sig: 'Dados & SIG (Epidemiologia Espacial)',
-        pesquisa: 'Pesquisa, Chaves & Artigos',
-        arquivos: 'Arquivos & Pranchas (Cofre Local)',
-        campo: 'Saída de Campo & Marcos Acadêmicos'
-      };
-
-      const titleEl = document.getElementById('header-title');
-      if (titleEl) titleEl.textContent = titles[state.activeTab] || 'BioMap Lab';
-
-      const dateEl = document.getElementById('header-date');
-      if (dateEl) {
-        const now = new Date();
-        dateEl.textContent = now.toLocaleDateString('pt-BR', {
-          weekday: 'long',
-          day: '2-digit',
-          month: 'long',
-          year: 'numeric'
-        });
-      }
-
-      // Estilo ativo dos botões de navegação
-      document.querySelectorAll('.nav-btn').forEach(btn => {
-        const nav = btn.getAttribute('data-nav');
-        if (nav === state.activeTab) {
-          btn.className = 'nav-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-xs transition-all';
-        } else {
-          btn.className = 'nav-btn w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/70 border border-transparent transition-all';
-        }
-      });
-
-      // Contadores
-      const pendingTasks = state.tasks.filter(t => t.status !== 'done').length;
-      const activeBatches = state.batches.length;
-      const openSigSteps = state.sigProjects.reduce((acc, p) => acc + p.checklist.filter(c => !c.done).length, 0)
-        + state.sigLogs.filter(l => !l.resolved).length;
-      const totalRefs = state.references.length;
-      const totalFiles = state.vaultMeta.length;
-      const fieldDone = state.fieldChecklist.filter(f => f.checked).length;
-      const fieldPct = state.fieldChecklist.length ? Math.round((fieldDone / state.fieldChecklist.length) * 100) : 0;
-
-      const setTxt = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = val;
-      };
-      setTxt('badge-agenda', pendingTasks);
-      setTxt('badge-bancada', activeBatches);
-      setTxt('badge-sig', openSigSteps);
-      setTxt('badge-pesquisa', totalRefs);
-      setTxt('badge-arquivos', totalFiles);
-      setTxt('badge-campo', `${fieldPct}%`);
-
-      // Progresso geral na sidebar
-      const doneTasks = state.tasks.filter(t => t.status === 'done').length;
-      const overallPct = state.tasks.length ? Math.round((doneTasks / state.tasks.length) * 100) : 0;
-      setTxt('sidebar-overall-pct', `${overallPct}%`);
-      const bar = document.getElementById('sidebar-overall-bar');
-      if (bar) bar.style.width = `${overallPct}%`;
-
-      const totalSpecimens = state.batches.reduce((acc, b) => acc + (Number(b.females) || 0) + (Number(b.males) || 0), 0);
-      setTxt('sidebar-specimen-summary', `${totalSpecimens} espécimes em ${activeBatches} lotes`);
-    }
-
-    // =========================================================================
-    // MÓDULO 1: VISÃO GERAL & AGENDA
-    // =========================================================================
-    function renderAgendaTab() {
-      const pendingTasks = state.tasks.filter(t => t.status !== 'done').length;
-      const totalSpecimens = state.batches.reduce((acc, b) => acc + (Number(b.females) || 0) + (Number(b.males) || 0), 0);
-      const readingItems = state.tasks.filter(t => t.pdfName && t.status !== 'done').length
-        + state.references.filter(r => r.status === 'Lendo').length;
-      const sigPending = state.sigProjects.reduce((acc, p) => acc + p.checklist.filter(c => !c.done).length, 0)
-        + state.sigLogs.filter(l => !l.resolved).length;
-
-      const filteredTasks = state.tasks.filter(t => {
-        const catOk = state.agendaCategoryFilter === 'Todas' || t.category === state.agendaCategoryFilter;
-        const priOk = state.agendaPriorityFilter === 'Todas' || t.priority === state.agendaPriorityFilter;
-        return catOk && priOk;
-      });
-
-      const categories = ['Todas', 'Bancada', 'SIG / Epidemio', 'Pesquisa & Leitura', 'Graduação', 'Pós-Graduação'];
-      const priorities = ['Todas', 'Alta', 'Média', 'Baixa'];
-
-      return `
-        <!-- KPIs de Visão Geral -->
-        <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          <div class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90">
-            <p class="text-xs text-slate-400">Tarefas Pendentes</p>
-            <div class="flex items-end justify-between mt-1.5">
-              <span class="text-2xl font-bold font-mono text-white">${pendingTasks}</span>
-              <span class="text-[11px] text-emerald-400 font-medium">${state.tasks.filter(t => t.status === 'done').length} concluídas</span>
-            </div>
-          </div>
-
-          <div onclick="switchTab('bancada')" class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-emerald-500/40 cursor-pointer transition-colors">
-            <p class="text-xs text-slate-400">Lotes em Bancada</p>
-            <div class="flex items-end justify-between mt-1.5">
-              <span class="text-2xl font-bold font-mono text-emerald-400">${state.batches.length}</span>
-              <span class="text-[11px] text-slate-400 font-mono">${totalSpecimens} espécimes</span>
-            </div>
-          </div>
-
-          <div onclick="switchTab('pesquisa')" class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 cursor-pointer transition-colors">
-            <p class="text-xs text-slate-400">Artigos & Chaves em Leitura</p>
-            <div class="flex items-end justify-between mt-1.5">
-              <span class="text-2xl font-bold font-mono text-cyan-400">${readingItems}</span>
-              <span class="text-[11px] text-slate-400">${state.references.length} no acervo</span>
-            </div>
-          </div>
-
-          <div onclick="switchTab('sig')" class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-amber-500/40 cursor-pointer transition-colors">
-            <p class="text-xs text-slate-400">Pendências SIG & Logs</p>
-            <div class="flex items-end justify-between mt-1.5">
-              <span class="text-2xl font-bold font-mono text-amber-400">${sigPending}</span>
-              <span class="text-[11px] text-slate-400">QGIS / SINAN</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- Barra de Controles: Filtros, Alternância Lista/Kanban e Botão Nova Tarefa -->
-        <section class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-1.5">
-              ${categories.map(cat => `
-                <button onclick="setAgendaCategoryFilter('${cat}')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${state.agendaCategoryFilter === cat ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'}">
-                  ${escapeHTML(cat)}
-                </button>
-              `).join('')}
-            </div>
-
-            <div class="flex items-center gap-2">
-              <!-- Seletor de Prioridade -->
-              <select onchange="setAgendaPriorityFilter(this.value)" class="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 outline-none">
-                ${priorities.map(p => `<option value="${p}" ${state.agendaPriorityFilter === p ? 'selected' : ''}>Prioridade: ${p}</option>`).join('')}
-              </select>
-
-              <!-- Toggle Lista / Kanban -->
-              <div class="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800">
-                <button onclick="setAgendaView('list')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${state.agendaView === 'list' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}">Lista</button>
-                <button onclick="setAgendaView('kanban')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${state.agendaView === 'kanban' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'}">Kanban</button>
-              </div>
-
-              <!-- Botão Nova Tarefa / Leitura PDF -->
-              <button onclick="openTaskModal()" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer">
-                <span>+ Nova Tarefa / Leitura PDF</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Adição Rápida Inline -->
-          <form onsubmit="handleQuickAddTask(event)" class="flex flex-col sm:flex-row gap-2 pt-1 border-t border-slate-800/80">
-            <input
-              id="quick-task-title"
-              type="text"
-              required
-              placeholder="Adicionar tarefa rápida (ex.: Conferir coordenadas do ponto CDC-03 no QGIS)..."
-              class="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500/60 text-xs sm:text-sm text-white placeholder-slate-500 outline-none"
-            />
-            <div class="flex gap-2">
-              <select id="quick-task-cat" class="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 outline-none">
-                <option value="Bancada">Bancada</option>
-                <option value="SIG / Epidemio">SIG / Epidemio</option>
-                <option value="Pesquisa & Leitura">Pesquisa & Leitura</option>
-                <option value="Graduação">Graduação</option>
-                <option value="Pós-Graduação">Pós-Graduação</option>
-              </select>
-              <button type="submit" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 border border-slate-700 transition-colors shrink-0">Adicionar</button>
-            </div>
-          </form>
-        </section>
-
-        <!-- Conteúdo das Tarefas (Lista ou Kanban) -->
-        ${state.agendaView === 'kanban' ? renderAgendaKanban(filteredTasks) : renderAgendaList(filteredTasks)}
-      `;
-    }
-
-    function renderTaskCard(task, compact = false) {
-      const catStyle = CATEGORY_STYLES[task.category] || 'bg-slate-800 text-slate-300 border-slate-700';
-      const priStyle = PRIORITY_STYLES[task.priority] || 'bg-slate-800 text-slate-300 border-slate-700';
-      const isDone = task.status === 'done';
-
-      // Verifica se há PDF vinculado e se o arquivo binário existe no IndexedDB deste computador
-      const hasPdfMeta = Boolean(task.pdfName || task.pdfId);
-      const hasLocalPdfBlob = Boolean(task.pdfId && existingVaultIds.has(task.pdfId));
-      const curPage = Math.max(1, parseInt(task.currentPage, 10) || 1);
-      const totPages = Math.max(curPage, parseInt(task.totalPages, 10) || 1);
-      const readPct = Math.min(100, Math.round((curPage / totPages) * 100));
-
-      return `
-        <article
-          draggable="true"
-          ondragstart="handleTaskDragStart(event, '${task.id}')"
-          class="p-4 rounded-2xl bg-slate-900 border ${isDone ? 'border-slate-800/60 opacity-75' : 'border-slate-800 hover:border-slate-700'} transition-all space-y-3"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex items-start gap-3 min-w-0">
-              <button
-                onclick="toggleTaskDone('${task.id}')"
-                class="mt-0.5 w-5 h-5 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${isDone ? 'bg-emerald-500 border-emerald-500 text-slate-950 font-bold' : 'border-slate-600 hover:border-emerald-400 text-transparent'}"
-                title="${isDone ? 'Reabrir tarefa' : 'Concluir tarefa'}"
-              >✓</button>
-
-              <div class="min-w-0 space-y-1">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span class="text-[10px] font-medium px-2 py-0.5 rounded-md border ${catStyle}">${escapeHTML(task.category)}</span>
-                  <span class="text-[10px] font-medium px-2 py-0.5 rounded-md border ${priStyle}">${escapeHTML(task.priority)}</span>
-                  ${task.dueDate ? `<span class="text-[11px] font-mono text-slate-400">📅 ${escapeHTML(formatDateBR(task.dueDate))}</span>` : ''}
-                </div>
-
-                <h4 class="text-sm font-semibold ${isDone ? 'line-through text-slate-400' : 'text-white'} leading-snug">
-                  ${escapeHTML(task.title)}
-                </h4>
-
-                ${task.notes && !compact ? `<p class="text-xs text-slate-400 leading-relaxed">${escapeHTML(task.notes)}</p>` : ''}
-              </div>
-            </div>
-
-            <!-- Ações Rápidas -->
-            <div class="flex items-center gap-1 shrink-0">
-              ${!compact ? `
-                <select onchange="changeTaskStatus('${task.id}', this.value)" class="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 outline-none">
-                  <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>A Fazer</option>
-                  <option value="doing" ${task.status === 'doing' ? 'selected' : ''}>Em Andamento</option>
-                  <option value="done" ${task.status === 'done' ? 'selected' : ''}>Concluído</option>
-                </select>
-              ` : ''}
-              <button onclick="openTaskModal('${task.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800" title="Editar tarefa">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              </button>
-              <button onclick="deleteTask('${task.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Excluir tarefa">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- Bloco de Leitura PDF & Marcador de Página -->
-          ${hasPdfMeta ? `
-            <div class="p-3 rounded-xl bg-slate-950/90 border border-cyan-500/25 space-y-2.5">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-cyan-400 text-xs">📄</span>
-                  <span class="text-xs font-mono text-cyan-200 truncate">${escapeHTML(task.pdfName)}</span>
-                </div>
-
-                <div class="flex items-center gap-1.5">
-                  <button onclick="stepItemPage('task', '${task.id}', -1)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-200" title="Página anterior">-1</button>
-                  <span class="text-xs font-mono text-emerald-300 px-1.5">Pág. ${curPage} / ${totPages} (${readPct}%)</span>
-                  <button onclick="stepItemPage('task', '${task.id}', 1)" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-200" title="Próxima página">+1</button>
-
-                  ${hasLocalPdfBlob ? `
-                    <button onclick="openPdfReaderModal('task', '${task.id}')" class="ml-1 px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-xs font-semibold text-cyan-200 transition-colors">
-                      Abrir PDF
-                    </button>
-                  ` : ''}
-                </div>
-              </div>
-
-              <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div class="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 rounded-full transition-all" style="width: ${readPct}%"></div>
-              </div>
-
-              ${!hasLocalPdfBlob ? `
-                <div class="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-amber-200">
-                  <span>PDF vinculado: <strong class="font-mono">${escapeHTML(task.pdfName)}</strong> — reanexe o arquivo local neste PC se quiser abrir o leitor; sua página atual (<strong>pág. ${curPage}</strong>) e anotações já estão sincronizadas!</span>
-                  <button onclick="triggerReattachLocalPdf('task', '${task.id}')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold shrink-0">
-                    Reanexar PDF local
-                  </button>
-                </div>
-              ` : ''}
-            </div>
-          ` : ''}
-        </article>
-      `;
-    }
-
-    function renderAgendaList(tasks) {
-      if (tasks.length === 0) {
-        return `
-          <div class="p-10 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center space-y-2">
-            <p class="text-sm font-medium text-slate-300">Nenhuma tarefa encontrada neste filtro.</p>
-            <p class="text-xs text-slate-500">Crie uma nova tarefa acima ou altere os filtros de categoria e prioridade.</p>
-          </div>
-        `;
-      }
-      return `<div class="space-y-3">${tasks.map(t => renderTaskCard(t, false)).join('')}</div>`;
-    }
-
-    function renderAgendaKanban(tasks) {
-      const cols = [
-        { key: 'todo', label: 'A Fazer', accent: 'text-slate-300 border-slate-700' },
-        { key: 'doing', label: 'Em Andamento', accent: 'text-cyan-300 border-cyan-500/40' },
-        { key: 'done', label: 'Concluído', accent: 'text-emerald-300 border-emerald-500/40' }
-      ];
-
-      return `
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          ${cols.map(col => {
-            const colTasks = tasks.filter(t => t.status === col.key);
-            return `
-              <div
-                ondragover="event.preventDefault()"
-                ondrop="handleTaskDrop(event, '${col.key}')"
-                class="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800/90 flex flex-col gap-3 min-h-[24rem]"
-              >
-                <div class="flex items-center justify-between pb-2 border-b ${col.accent}">
-                  <span class="text-xs font-bold uppercase tracking-wider">${col.label}</span>
-                  <span class="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">${colTasks.length}</span>
-                </div>
-                <div class="space-y-3 flex-1">
-                  ${colTasks.length ? colTasks.map(t => renderTaskCard(t, true)).join('') : `<p class="text-xs text-slate-500 text-center py-8">Arraste um card para cá</p>`}
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      `;
-    }
-
-    let draggedTaskId = null;
-    function handleTaskDragStart(event, id) {
-      draggedTaskId = id;
-    }
-    function handleTaskDrop(event, targetStatus) {
-      event.preventDefault();
-      if (!draggedTaskId) return;
-      changeTaskStatus(draggedTaskId, targetStatus);
-      draggedTaskId = null;
-    }
-
-    function setAgendaCategoryFilter(cat) {
-      state.agendaCategoryFilter = cat;
-      saveState(false);
-      renderApp();
-    }
-    function setAgendaPriorityFilter(pri) {
-      state.agendaPriorityFilter = pri;
-      saveState(false);
-      renderApp();
-    }
-    function setAgendaView(view) {
-      state.agendaView = view;
-      saveState(false);
-      renderApp();
-    }
-
-    function handleQuickAddTask(event) {
-      event.preventDefault();
-      const input = document.getElementById('quick-task-title');
-      const catSel = document.getElementById('quick-task-cat');
-      const title = (input?.value || '').trim();
-      if (!title) return;
-
-      state.tasks.unshift({
-        id: 't-' + Date.now(),
-        title,
-        category: catSel ? catSel.value : 'Bancada',
-        priority: 'Média',
-        status: 'todo',
-        dueDate: new Date().toISOString().split('T')[0],
-        notes: '',
-        pdfId: '',
-        pdfName: '',
-        currentPage: 1,
-        totalPages: 1
-      });
-      saveState(true);
-      renderApp();
-      showToast('Tarefa adicionada!', 'success');
-    }
-
-    function toggleTaskDone(id) {
-      const task = state.tasks.find(t => t.id === id);
-      if (!task) return;
-      task.status = task.status === 'done' ? 'todo' : 'done';
-      saveState(true);
-      renderApp();
-    }
-
-    function changeTaskStatus(id, status) {
-      const task = state.tasks.find(t => t.id === id);
-      if (!task) return;
-      task.status = status;
-      saveState(true);
-      renderApp();
-    }
-
-    function stepItemPage(kind, id, delta) {
-      const item = kind === 'task'
-        ? state.tasks.find(t => t.id === id)
-        : state.references.find(r => r.id === id);
-      if (!item) return;
-      const next = Math.max(1, (parseInt(item.currentPage, 10) || 1) + delta);
-      item.currentPage = next;
-      if (item.totalPages && next > item.totalPages) {
-        item.totalPages = next;
-      }
-      saveState(true);
-      renderApp();
-    }
-
-    function deleteTask(id) {
-      state.tasks = state.tasks.filter(t => t.id !== id);
-      saveState(true);
-      renderApp();
-      showToast('Tarefa removida.', 'info');
-    }
-
-    function openTaskModal(editId = null) {
-      const task = editId ? state.tasks.find(t => t.id === editId) : null;
-      const pdfVaultItems = state.vaultMeta.filter(m => m.type === 'application/pdf' || (m.name || '').toLowerCase().endsWith('.pdf'));
-
-      const html = `
-        <form onsubmit="saveTaskFromModal(event, '${editId || ''}')" class="p-5 sm:p-6 space-y-4">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 class="text-base font-bold text-white">${task ? 'Editar Tarefa / Leitura' : 'Nova Tarefa / Leitura PDF'}</h3>
-            <button type="button" onclick="closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">✕</button>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Título da Tarefa ou Leitura *</label>
-            <input id="task-modal-title" type="text" required value="${escapeHTML(task?.title || '')}" placeholder="Ex.: Fichar chave de Phlebotominae ou processar shapefile no QGIS" class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-sm text-white outline-none" />
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Categoria</label>
-              <select id="task-modal-cat" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
-                ${['Bancada', 'SIG / Epidemio', 'Pesquisa & Leitura', 'Graduação', 'Pós-Graduação'].map(c => `<option value="${c}" ${task?.category === c ? 'selected' : ''}>${c}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Prioridade</label>
-              <select id="task-modal-pri" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
-                ${['Alta', 'Média', 'Baixa'].map(p => `<option value="${p}" ${(task?.priority || 'Média') === p ? 'selected' : ''}>${p}</option>`).join('')}
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Prazo</label>
-              <input id="task-modal-date" type="date" value="${escapeHTML(task?.dueDate || '')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none" />
-            </div>
-          </div>
-
-          <!-- Seção Azul: Anexo de Artigo / Manual em PDF & Marcador de Página -->
-          <div class="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-semibold text-cyan-300">📄 Anexo de Artigo / Manual em PDF & Marcador de Página</span>
-              ${task?.pdfName ? `<span class="text-[11px] font-mono text-emerald-300 truncate max-w-[11rem]">${escapeHTML(task.pdfName)}</span>` : ''}
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label class="block text-[11px] text-slate-300 mb-1">Enviar PDF do Computador</label>
-                <input id="task-modal-pdf-file" type="file" accept="application/pdf,.pdf" class="w-full text-xs text-slate-300 file:mr-2.5 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-500/20 file:text-cyan-200 hover:file:bg-cyan-500/30" />
-              </div>
-              <div>
-                <label class="block text-[11px] text-slate-300 mb-1">Ou escolher PDF já no Cofre</label>
-                <select id="task-modal-pdf-existing" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 outline-none">
-                  <option value="">-- Manter / Nenhum --</option>
-                  ${pdfVaultItems.map(p => `<option value="${p.id}" ${task?.pdfId === p.id ? 'selected' : ''}>${escapeHTML(p.title || p.name)}</option>`).join('')}
-                </select>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-[11px] text-slate-300 mb-1">Página Atual</label>
-                <input id="task-modal-cur-page" type="number" min="1" value="${task?.currentPage || 1}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
-              </div>
-              <div>
-                <label class="block text-[11px] text-slate-300 mb-1">Total de Páginas</label>
-                <input id="task-modal-tot-pages" type="number" min="1" value="${task?.totalPages || 1}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Observações / Anotações</label>
-            <textarea id="task-modal-notes" rows="3" placeholder="Detalhes metodológicos, trechos de leitura ou passos pendentes..." class="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-xs text-white outline-none">${escapeHTML(task?.notes || '')}</textarea>
-          </div>
-
-          <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300">Cancelar</button>
-            <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-slate-950">Salvar Tarefa</button>
-          </div>
-        </form>
-      `;
-      openModal(html, 'max-w-xl');
-    }
-
-    async function saveTaskFromModal(event, editId) {
-      event.preventDefault();
-      const title = document.getElementById('task-modal-title').value.trim();
-      if (!title) return;
-
-      const category = document.getElementById('task-modal-cat').value;
-      const priority = document.getElementById('task-modal-pri').value;
-      const dueDate = document.getElementById('task-modal-date').value;
-      const notes = document.getElementById('task-modal-notes').value;
-      const currentPage = Math.max(1, parseInt(document.getElementById('task-modal-cur-page').value, 10) || 1);
-      const totalPages = Math.max(currentPage, parseInt(document.getElementById('task-modal-tot-pages').value, 10) || 1);
-
-      const fileInput = document.getElementById('task-modal-pdf-file');
-      const existingSelect = document.getElementById('task-modal-pdf-existing');
-      const uploadedFile = fileInput && fileInput.files && fileInput.files[0];
-
-      const existingTask = editId ? state.tasks.find(t => t.id === editId) : null;
-      let pdfId = existingTask ? existingTask.pdfId : '';
-      let pdfName = existingTask ? existingTask.pdfName : '';
-
-      if (uploadedFile) {
-        const meta = await storeFileInVault(uploadedFile, { title });
-        pdfId = meta.id;
-        pdfName = uploadedFile.name;
-      } else if (existingSelect && existingSelect.value) {
-        const selectedMeta = state.vaultMeta.find(m => m.id === existingSelect.value);
-        if (selectedMeta) {
-          pdfId = selectedMeta.id;
-          pdfName = selectedMeta.name;
-        }
-      }
-
-      if (existingTask) {
-        Object.assign(existingTask, { title, category, priority, dueDate, notes, pdfId, pdfName, currentPage, totalPages });
-      } else {
-        state.tasks.unshift({
-          id: 't-' + Date.now(),
-          title,
-          category,
-          priority,
-          status: 'todo',
-          dueDate,
-          notes,
-          pdfId,
-          pdfName,
-          currentPage,
-          totalPages
-        });
-      }
-
-      saveState(true);
-      closeModal();
-      renderApp();
-      showToast(existingTask ? 'Tarefa atualizada!' : 'Tarefa criada com sucesso!', 'success');
-    }
-
-    // =========================================================================
-    // MÓDULO 2: BANCADA & LÂMINAS (PIPELINE + FOTOS + GERADOR DE ETIQUETAS)
+    // MÓDULO 2: BANCADA & LÂMINAS (PROTOCOLOS FLEXÍVEIS + FOTOS + ETIQUETAS)
     // =========================================================================
     function renderBancadaTab() {
-      const stageCounts = BANCADA_STAGES.map((_, idx) => state.batches.filter(b => b.stage === idx).length);
-      const filteredBatches = state.bancadaStageFilter === 'Todas'
-        ? state.batches
-        : state.batches.filter(b => b.stage === Number(state.bancadaStageFilter));
+      const protoFilters = [
+        { id: 'Todos', label: 'Todos os Protocolos' },
+        { id: 'slide', label: 'Lâmina & Clarificação' },
+        { id: 'stereo', label: 'Direta em Lupa' },
+        { id: 'quick', label: 'Triagem Rápida' },
+        { id: 'custom', label: 'Personalizado' }
+      ];
+
+      const statusFilters = ['Em Andamento', 'Concluídos', 'Todos'];
+
+      const filteredBatches = state.batches.filter(b => {
+        const protoOk = state.bancadaProtocolFilter === 'Todos' || (b.protocol || 'slide') === state.bancadaProtocolFilter;
+        const steps = getBatchSteps(b);
+        const isCompleted = b.stage >= steps.length - 1;
+        let statusOk = true;
+        if (state.bancadaStatusFilter === 'Em Andamento') statusOk = !isCompleted;
+        if (state.bancadaStatusFilter === 'Concluídos') statusOk = isCompleted;
+        return protoOk && statusOk;
+      });
 
       return `
         <!-- Cabeçalho da Bancada + Botões de Ação -->
         <section class="p-4 rounded-2xl bg-slate-900 border border-slate-800/90 space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="text-sm font-bold text-white">Pipeline de Processamento Biológico & Lâminas</h3>
-              <p class="text-xs text-slate-400">Acompanhe lotes desde a triagem até a identificação taxonômica e prancha fotográfica.</p>
+              <h3 class="text-sm font-bold text-white">Bancada Entomológica & Fluxos por Grupo Taxonômico</h3>
+              <p class="text-xs text-slate-400">Escolha o protocolo adequado (lâmina clarificada, identificação direta em lupa ou triagem) e clique em qualquer etapa para pular diretamente.</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <button onclick="openLabelGeneratorModal()" class="px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-xs font-semibold text-cyan-200 flex items-center gap-1.5 transition-colors cursor-pointer">
@@ -2449,28 +2583,39 @@
             </div>
           </div>
 
-          <!-- Barra de Filtro das 5 Etapas -->
-          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <button onclick="setBancadaStageFilter('Todas')" class="p-2.5 rounded-xl border text-left transition-all ${state.bancadaStageFilter === 'Todas' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}">
-              <span class="block text-[10px] uppercase tracking-wider">Todos os Lotes</span>
-              <span class="text-base font-bold font-mono text-white">${state.batches.length}</span>
-            </button>
+          <!-- Filtros por Protocolo e Status -->
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${protoFilters.map(pf => {
+                const count = pf.id === 'Todos'
+                  ? state.batches.length
+                  : state.batches.filter(b => (b.protocol || 'slide') === pf.id).length;
+                const active = state.bancadaProtocolFilter === pf.id;
+                return `
+                  <button onclick="setBancadaProtocolFilter('${pf.id}')" class="px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'}">
+                    <span>${escapeHTML(pf.label)}</span>
+                    <span class="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/90 text-slate-300">${count}</span>
+                  </button>
+                `;
+              }).join('')}
+            </div>
 
-            ${BANCADA_STAGES.map((stageName, idx) => `
-              <button onclick="setBancadaStageFilter('${idx}')" class="p-2.5 rounded-xl border text-left transition-all ${String(state.bancadaStageFilter) === String(idx) ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200' : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'}">
-                <span class="block text-[10px] font-mono text-slate-500">Etapa ${idx + 1}</span>
-                <span class="block text-xs font-semibold truncate">${escapeHTML(stageName)}</span>
-                <span class="text-sm font-bold font-mono text-white">${stageCounts[idx]}</span>
-              </button>
-            `).join('')}
+            <div class="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800 self-start lg:self-auto">
+              ${statusFilters.map(sf => `
+                <button onclick="setBancadaStatusFilter('${sf}')" class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${state.bancadaStatusFilter === sf ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-slate-200'}">
+                  ${escapeHTML(sf)}
+                </button>
+              `).join('')}
+            </div>
           </div>
         </section>
 
         <!-- Grade de Lotes Biológicos -->
         <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${filteredBatches.length === 0 ? `
-            <div class="md:col-span-2 p-10 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center">
-              <p class="text-sm text-slate-300">Nenhum lote biológico nesta etapa.</p>
+            <div class="md:col-span-2 p-10 rounded-2xl bg-slate-900/60 border border-dashed border-slate-800 text-center space-y-1.5">
+              <p class="text-sm font-medium text-slate-300">Nenhum lote biológico encontrado neste filtro.</p>
+              <p class="text-xs text-slate-500">Altere o filtro de protocolo/status acima ou cadastre um novo lote.</p>
             </div>
           ` : filteredBatches.map(b => renderBatchCard(b)).join('')}
         </section>
@@ -2478,7 +2623,11 @@
     }
 
     function renderBatchCard(batch) {
-      const stagePct = Math.round(((batch.stage + 1) / BANCADA_STAGES.length) * 100);
+      const proto = getBatchProtocolObj(batch);
+      const steps = getBatchSteps(batch);
+      const currentIdx = Math.min(steps.length - 1, Math.max(0, parseInt(batch.stage, 10) || 0));
+      const stagePct = Math.round(((currentIdx + 1) / steps.length) * 100);
+      const isFinished = currentIdx >= steps.length - 1;
       const linkedPhotos = state.vaultMeta.filter(m => m.batchId === batch.id && (m.type || '').startsWith('image/'));
       const totalSpec = (Number(batch.females) || 0) + (Number(batch.males) || 0);
 
@@ -2487,14 +2636,15 @@
           <div class="space-y-3">
             <div class="flex items-start justify-between gap-2">
               <div>
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">${escapeHTML(batch.code)}</span>
-                  <span class="text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-cyan-300">${escapeHTML(batch.mountingMedium)}</span>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg bg-slate-950 text-white border border-slate-700">${escapeHTML(batch.code)}</span>
+                  <span class="text-[11px] font-medium px-2 py-0.5 rounded-lg border ${proto.badgeClass}">${escapeHTML(proto.label)}</span>
+                  <span class="text-[11px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">${escapeHTML(batch.mountingMedium)}</span>
                 </div>
                 <h4 class="text-sm sm:text-base font-bold text-white italic mt-1.5">${escapeHTML(batch.targetGroup)}</h4>
               </div>
 
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-1 shrink-0">
                 <button onclick="openBatchModal('${batch.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800" title="Editar lote">✎</button>
                 <button onclick="deleteBatch('${batch.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800" title="Excluir lote">✕</button>
               </div>
@@ -2511,14 +2661,39 @@
               </div>
             </div>
 
-            <!-- Barra de Etapa Atual -->
-            <div class="space-y-1.5">
+            <!-- Barra Visual Interativa com Todas as Etapas do Protocolo -->
+            <div class="space-y-2">
               <div class="flex items-center justify-between text-xs">
-                <span class="font-semibold text-cyan-300">Etapa ${batch.stage + 1}/5: ${escapeHTML(BANCADA_STAGES[batch.stage])}</span>
+                <span class="font-semibold text-cyan-300">Etapa ${currentIdx + 1}/${steps.length}: ${escapeHTML(steps[currentIdx])}</span>
                 <span class="font-mono text-slate-400">${stagePct}%</span>
               </div>
-              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+
+              <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
                 <div class="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 rounded-full transition-all" style="width: ${stagePct}%"></div>
+              </div>
+
+              <!-- Passos Clicáveis para Pular Diretamente para Qualquer Etapa -->
+              <div class="flex flex-wrap gap-1 pt-0.5">
+                ${steps.map((stepLabel, idx) => {
+                  const isCurrent = idx === currentIdx;
+                  const isPast = idx < currentIdx;
+                  let pillClass = 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-200 hover:border-slate-600';
+                  if (isCurrent) {
+                    pillClass = 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 font-semibold shadow-xs';
+                  } else if (isPast) {
+                    pillClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300/90 hover:border-emerald-400';
+                  }
+                  return `
+                    <button
+                      type="button"
+                      onclick="setBatchStage('${batch.id}', ${idx})"
+                      title="Clique para ir direto para: ${escapeHTML(stepLabel)}"
+                      class="px-2 py-1 rounded-lg border text-[10px] transition-all cursor-pointer ${pillClass}"
+                    >
+                      ${isPast ? '✓ ' : `${idx + 1}. `}${escapeHTML(stepLabel)}
+                    </button>
+                  `;
+                }).join('')}
               </div>
             </div>
 
@@ -2527,7 +2702,7 @@
             <!-- Miniaturas de Microfotografias Vinculadas ao Lote -->
             ${linkedPhotos.length > 0 ? `
               <div class="pt-1 space-y-1.5">
-                <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Lâminas Fotografadas (${linkedPhotos.length})</span>
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Registros Fotográficos (${linkedPhotos.length})</span>
                 <div class="flex flex-wrap gap-2">
                   ${linkedPhotos.map(photo => {
                     const thumbUrl = blobUrlCache.get(photo.id);
@@ -2546,16 +2721,19 @@
 
           <!-- Rodapé de Ações do Lote -->
           <div class="pt-3 border-t border-slate-800/90 flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <button onclick="triggerBatchPhotoUpload('${batch.id}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-emerald-300 border border-slate-700 transition-colors cursor-pointer">
                 + Foto / Lâmina
               </button>
               <button onclick="openLabelGeneratorModal('${batch.id}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-cyan-300 border border-slate-700 transition-colors cursor-pointer">
                 Etiqueta
               </button>
+              <button onclick="openBatchModal('${batch.id}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition-colors cursor-pointer">
+                Editar
+              </button>
             </div>
 
-            ${batch.stage < BANCADA_STAGES.length - 1 ? `
+            ${!isFinished ? `
               <button onclick="advanceBatchStage('${batch.id}')" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold text-xs transition-colors cursor-pointer">
                 Avançar Etapa →
               </button>
@@ -2569,20 +2747,38 @@
       `;
     }
 
-    function setBancadaStageFilter(val) {
-      state.bancadaStageFilter = val;
+    function setBancadaProtocolFilter(val) {
+      state.bancadaProtocolFilter = val;
       saveState(false);
       renderApp();
+    }
+
+    function setBancadaStatusFilter(val) {
+      state.bancadaStatusFilter = val;
+      saveState(false);
+      renderApp();
+    }
+
+    function setBatchStage(id, targetStageIdx) {
+      const batch = state.batches.find(b => b.id === id);
+      if (!batch) return;
+      const steps = getBatchSteps(batch);
+      const safeIdx = Math.min(steps.length - 1, Math.max(0, parseInt(targetStageIdx, 10) || 0));
+      batch.stage = safeIdx;
+      saveState(true);
+      renderApp();
+      showToast(`${batch.code} → ${steps[safeIdx]}`, 'success');
     }
 
     function advanceBatchStage(id) {
       const batch = state.batches.find(b => b.id === id);
       if (!batch) return;
-      if (batch.stage < BANCADA_STAGES.length - 1) {
+      const steps = getBatchSteps(batch);
+      if (batch.stage < steps.length - 1) {
         batch.stage += 1;
         saveState(true);
         renderApp();
-        showToast(`Lote ${batch.code} avançou para: ${BANCADA_STAGES[batch.stage]}`, 'success');
+        showToast(`Lote ${batch.code} avançou para: ${steps[batch.stage]}`, 'success');
       }
     }
 
@@ -2611,7 +2807,7 @@
         await storeFileInVault(file, {
           title: batch ? `${batch.code} — ${file.name}` : file.name,
           batchId: pendingBatchPhotoTargetId,
-          structure: 'Lâmina / Microfotografia'
+          structure: 'Lâmina / Espécime'
         });
       }
 
@@ -2622,11 +2818,37 @@
 
     function openBatchModal(editId = null) {
       const b = editId ? state.batches.find(x => x.id === editId) : null;
+      const currentProtocol = b?.protocol && BANCADA_PROTOCOLS[b.protocol] ? b.protocol : 'slide';
+      const customStagesText = Array.isArray(b?.customStages) && b.customStages.length
+        ? b.customStages.join(', ')
+        : 'Triagem, Extração DNA, PCR, Sequenciamento';
+      const initialSteps = getBatchSteps({ protocol: currentProtocol, customStages: customStagesText.split(',').map(s => s.trim()).filter(Boolean) });
+      const initialStage = Math.min(initialSteps.length - 1, Math.max(0, b?.stage ?? 0));
+
       const html = `
         <form onsubmit="saveBatchFromModal(event, '${editId || ''}')" class="p-5 sm:p-6 space-y-4">
           <div class="flex items-center justify-between border-b border-slate-800 pb-3">
             <h3 class="text-base font-bold text-white">${b ? 'Editar Lote Biológico' : 'Novo Lote Biológico'}</h3>
             <button type="button" onclick="closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">✕</button>
+          </div>
+
+          <!-- Botões de Preenchimento Rápido por Grupo Taxonômico -->
+          <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+            <span class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">Atalhos Rápidos de Protocolo & Preservação:</span>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <button type="button" onclick="applyBatchPreset('phlebotominae')" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-[11px] font-semibold text-emerald-300 transition-colors cursor-pointer">
+                Phlebotominae
+              </button>
+              <button type="button" onclick="applyBatchPreset('anopheles')" class="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/35 text-[11px] font-semibold text-cyan-300 transition-colors cursor-pointer">
+                Anopheles
+              </button>
+              <button type="button" onclick="applyBatchPreset('aedes_culex')" class="px-2.5 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/35 text-[11px] font-semibold text-sky-300 transition-colors cursor-pointer">
+                Aedes / Culex
+              </button>
+              <button type="button" onclick="applyBatchPreset('triagem_geral')" class="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/35 text-[11px] font-semibold text-amber-300 transition-colors cursor-pointer">
+                Triagem Geral
+              </button>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2635,21 +2857,35 @@
               <input id="batch-code" type="text" required value="${escapeHTML(b?.code || 'LOT-2026-025')}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Meio de Montagem / Conservação</label>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Meio de Preservação / Montagem</label>
               <select id="batch-medium" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
-                ${['Berlese', 'Bálsamo do Canadá', 'Euparal', 'Alfinetado', 'Álcool 70%'].map(m => `<option value="${m}" ${b?.mountingMedium === m ? 'selected' : ''}>${m}</option>`).join('')}
+                ${PRESERVATION_MEDIA.map(m => `<option value="${m}" ${b?.mountingMedium === m ? 'selected' : ''}>${m}</option>`).join('')}
               </select>
             </div>
           </div>
 
+          <!-- Seletor de Protocolo de Bancada -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Protocolo de Bancada</label>
+            <select id="batch-protocol" onchange="onBatchProtocolChange()" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-cyan-500/40 text-xs text-cyan-200 outline-none">
+              ${Object.values(BANCADA_PROTOCOLS).map(p => `<option value="${p.id}" ${currentProtocol === p.id ? 'selected' : ''}>${escapeHTML(p.fullLabel)}</option>`).join('')}
+            </select>
+          </div>
+
+          <!-- Campo Condicional para Etapas Customizadas -->
+          <div id="batch-custom-stages-wrap" class="${currentProtocol === 'custom' ? '' : 'hidden'}">
+            <label class="block text-xs font-medium text-violet-300 mb-1">Etapas Personalizadas (separadas por vírgula)</label>
+            <input id="batch-custom-stages" type="text" oninput="onBatchProtocolChange()" value="${escapeHTML(customStagesText)}" placeholder="Ex.: Triagem, Extração DNA, PCR, Sequenciamento" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-violet-500/40 text-xs text-white outline-none" />
+          </div>
+
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Táxon / Grupo Alvo *</label>
-            <input id="batch-taxon" type="text" required value="${escapeHTML(b?.targetGroup || '')}" placeholder="Ex.: Nyssomyia umbratilis (Phlebotominae)" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none" />
+            <input id="batch-taxon" type="text" required value="${escapeHTML(b?.targetGroup || '')}" placeholder="Ex.: Nyssomyia umbratilis ou Anopheles darlingi" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none" />
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Município / Localidade</label>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Município / Ponto de Coleta</label>
               <input id="batch-muni" type="text" value="${escapeHTML(b?.municipality || '')}" placeholder="Ex.: Presidente Figueiredo - AM" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none" />
             </div>
             <div>
@@ -2668,9 +2904,9 @@
               <input id="batch-males" type="number" min="0" value="${b?.males ?? 0}" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white outline-none" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-300 mb-1">Etapa Inicial</label>
+              <label class="block text-xs font-medium text-slate-300 mb-1">Etapa Atual</label>
               <select id="batch-stage" class="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none">
-                ${BANCADA_STAGES.map((st, i) => `<option value="${i}" ${(b?.stage ?? 0) === i ? 'selected' : ''}>${i + 1}. ${st}</option>`).join('')}
+                ${initialSteps.map((st, i) => `<option value="${i}" ${initialStage === i ? 'selected' : ''}>${i + 1}. ${escapeHTML(st)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -2689,10 +2925,60 @@
       openModal(html, 'max-w-lg');
     }
 
+    function applyBatchPreset(presetKey) {
+      const preset = BANCADA_PRESETS[presetKey];
+      if (!preset) return;
+      const protoEl = document.getElementById('batch-protocol');
+      const medEl = document.getElementById('batch-medium');
+      const taxonEl = document.getElementById('batch-taxon');
+      if (protoEl) protoEl.value = preset.protocol;
+      if (medEl) medEl.value = preset.medium;
+      if (taxonEl) taxonEl.placeholder = preset.taxonPlaceholder;
+      onBatchProtocolChange();
+    }
+
+    function onBatchProtocolChange() {
+      const protoEl = document.getElementById('batch-protocol');
+      const customWrap = document.getElementById('batch-custom-stages-wrap');
+      const customInput = document.getElementById('batch-custom-stages');
+      const stageSelect = document.getElementById('batch-stage');
+      if (!protoEl || !stageSelect) return;
+
+      const protocol = protoEl.value;
+      if (customWrap) {
+        customWrap.classList.toggle('hidden', protocol !== 'custom');
+      }
+
+      const customArr = (customInput?.value || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      const steps = getBatchSteps({ protocol, customStages: customArr });
+      const prevIdx = Math.min(steps.length - 1, Math.max(0, parseInt(stageSelect.value, 10) || 0));
+
+      stageSelect.innerHTML = steps
+        .map((st, idx) => `<option value="${idx}" ${idx === prevIdx ? 'selected' : ''}>${idx + 1}. ${escapeHTML(st)}</option>`)
+        .join('');
+    }
+
     function saveBatchFromModal(event, editId) {
       event.preventDefault();
-      const data = {
+      const protocol = document.getElementById('batch-protocol').value;
+      const customRaw = document.getElementById('batch-custom-stages')?.value || '';
+      const customStages = protocol === 'custom'
+        ? customRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      if (protocol === 'custom' && customStages.length === 0) {
+        showToast('Informe ao menos uma etapa personalizada separada por vírgula.', 'error');
+        return;
+      }
+
+      const data = normalizeBatchRecord({
         code: document.getElementById('batch-code').value.trim(),
+        protocol,
+        customStages,
         targetGroup: document.getElementById('batch-taxon').value.trim(),
         municipality: document.getElementById('batch-muni').value.trim(),
         coordinates: document.getElementById('batch-coords').value.trim(),
@@ -2701,7 +2987,7 @@
         males: Math.max(0, parseInt(document.getElementById('batch-males').value, 10) || 0),
         stage: parseInt(document.getElementById('batch-stage').value, 10) || 0,
         notes: document.getElementById('batch-notes').value.trim()
-      };
+      });
 
       if (editId) {
         const existing = state.batches.find(b => b.id === editId);
@@ -2717,19 +3003,20 @@
     }
 
     // =========================================================================
-    // GERADOR DE ETIQUETAS DE LÂMINAS + IMPRESSÃO LIMPA (@media print)
+    // GERADOR DE ETIQUETAS (LÂMINAS -L01 E TUBOS/ALFINETES -T01)
     // =========================================================================
     function openLabelGeneratorModal(batchId = null) {
       const b = batchId ? state.batches.find(x => x.id === batchId) : state.batches[0];
       const todayStr = new Date().toLocaleDateString('pt-BR');
       const defaultSex = b ? (b.females > 0 && b.males === 0 ? '♀ Fêmea' : b.males > 0 && b.females === 0 ? '♂ Macho' : '♀ / ♂') : '♀ Fêmea';
+      const defaultPrefixMode = b && (b.protocol === 'stereo' || b.protocol === 'quick') ? 'T' : 'L';
 
       const html = `
         <div class="p-5 sm:p-6 space-y-4">
           <div class="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
-              <h3 class="text-base font-bold text-white">Gerador de Etiquetas de Lâminas</h3>
-              <p class="text-xs text-slate-400">Configure os dados da lâmina e imprima em folha limpa com bordas de corte.</p>
+              <h3 class="text-base font-bold text-white">Gerador de Etiquetas (Lâminas, Tubos & Alfinetes)</h3>
+              <p class="text-xs text-slate-400">Configure os dados e imprima em folha limpa com bordas de corte.</p>
             </div>
             <button onclick="closeModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">✕</button>
           </div>
@@ -2764,7 +3051,7 @@
                   <input id="lbl-sex" type="text" oninput="updateLabelPreview()" value="${escapeHTML(defaultSex)}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white outline-none" />
                 </div>
                 <div>
-                  <label class="block text-slate-400 mb-1">Meio de Montagem</label>
+                  <label class="block text-slate-400 mb-1">Meio / Preservação</label>
                   <input id="lbl-medium" type="text" oninput="updateLabelPreview()" value="${escapeHTML(b?.mountingMedium || 'Berlese')}" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white outline-none" />
                 </div>
               </div>
@@ -2785,10 +3072,14 @@
                 </div>
               </div>
 
-              <label class="flex items-center gap-2 pt-1 text-slate-300 cursor-pointer">
-                <input id="lbl-seq" type="checkbox" checked onchange="updateLabelPreview()" class="rounded bg-slate-950 border-slate-700 text-emerald-500" />
-                <span>Numerar lâminas sequencialmente (<code class="text-cyan-300">-L01, -L02...</code>)</span>
-              </label>
+              <div>
+                <label class="block text-slate-400 mb-1">Numeração Sequencial</label>
+                <select id="lbl-seq-mode" onchange="updateLabelPreview()" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-cyan-200 outline-none">
+                  <option value="L" ${defaultPrefixMode === 'L' ? 'selected' : ''}>Lâminas (-L01, -L02...)</option>
+                  <option value="T" ${defaultPrefixMode === 'T' ? 'selected' : ''}>Tubos / Alfinetes (-T01, -T02...)</option>
+                  <option value="NONE">Sem numeração sequencial</option>
+                </select>
+              </div>
             </div>
 
             <!-- Pré-visualização ao Vivo em Fundo Branco -->
@@ -2823,11 +3114,11 @@
       const loc = document.getElementById('lbl-loc')?.value || '';
       const coords = document.getElementById('lbl-coords')?.value || '';
       const date = document.getElementById('lbl-date')?.value || '';
-      const sequential = Boolean(document.getElementById('lbl-seq')?.checked);
+      const seqMode = document.getElementById('lbl-seq-mode')?.value || 'L';
 
       const list = [];
       for (let i = 1; i <= copies; i++) {
-        const suffix = sequential ? `-L${String(i).padStart(2, '0')}` : '';
+        const suffix = seqMode === 'NONE' ? '' : `-${seqMode}${String(i).padStart(2, '0')}`;
         list.push({
           header,
           code: `${baseCode}${suffix}`,
@@ -2854,7 +3145,7 @@
           <div class="truncate">${escapeHTML(lbl.loc)}</div>
           ${lbl.coords ? `<div class="text-[9px] text-slate-700">${escapeHTML(lbl.coords)}</div>` : ''}
           <div class="flex justify-between border-t border-slate-300 mt-1 pt-0.5 text-[9px]">
-            <span>Meio: ${escapeHTML(lbl.medium)}</span>
+            <span>Preserv.: ${escapeHTML(lbl.medium)}</span>
             <span>${escapeHTML(lbl.date)}</span>
           </div>
         </div>
